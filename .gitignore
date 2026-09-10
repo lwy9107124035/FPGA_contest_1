@@ -27,6 +27,19 @@ tools/multires_demo/*.BMP
 tools/opt_surgery/cand_run/
 tools/opt_surgery/ctrl_run/
 tools/opt_surgery/_*.log
+tools/opt_surgery/_usb_*.txt
+
+# 历史版本报告（b17~b22q 实体已移入 _cold_archive/，不再随版本走）
+tools/opt_surgery/reports_b1*/
+tools/opt_surgery/reports_b19*/
+tools/opt_surgery/reports_b20*/
+tools/opt_surgery/reports_b21*/
+tools/opt_surgery/reports_b22*/
+
+# 2026-09-10 激进清理产物：冷归档与回滚备份，不入库
+_cold_archive/
+_refactor_backup/
+td_project*/
 
 # 系统
 Thumbs.db
