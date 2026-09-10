@@ -28,7 +28,7 @@ module tb_scaler_burst;
     localparam SRC_H = 600;
     // 板上节奏：SD 扇区读 512 字节 @ ~6.25MB/s，SD 域 100MHz
     //   -> 512 字约 8192 clk；扇区之间空档约 6000 clk（保守取 1/2 占空）
-    localparam BURST_LEN  = 8000;
+    localparam BURST_LEN  = 1024;
     localparam BURST_GAP  = 6000;
 
     reg        clk = 1'b0;
