@@ -20,7 +20,7 @@
     // 资源：环 24 BRAM9K（总 ~49/64）+ 2×17/16 乘 + 16×16 乘（守卫 b_c0）。
     //=============================================================================
 `default_nettype none
-module img_scaler (
+module img_scaler_A (
     input  wire        clk,
     input  wire        rst_n,
     input  wire        in_en,

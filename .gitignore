@@ -44,3 +44,13 @@ td_project*/
 # 系统
 Thumbs.db
 desktop.ini
+
+# iverilog 产物
+tools/tests/*.vvp
+tools/tests/*.out
+tools/tests/tb*.out
+tools/tests/g*.out
+tools/tests/m*.out
+tools/tests/nc*.vvp
+tools/tests/scaler_out*.txt
+tools/tests/scaler_trace*.txt
