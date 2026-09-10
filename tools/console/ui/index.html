@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<!--
+  index.html — FPGA 播控终端「图形控制页」（内联 CSS/JS，零外部资源，断网也能跑）
+
+  这是什么：替代 XCOM 的可视化控制台。按钮点一下 = 帮你敲一条串口命令，
+  大屏上立刻见效；SD 卡里的图片自动变“资源墙”卡片，勾一勾就能选播。
+
+  怎么打开：先跑 python console.py（或 --mock 假板子模式），
+  浏览器访问 http://127.0.0.1:8765 即可。
+
+  懂技术的话：本页所有动作都 POST 到本机 /api，由 console.py 排队发串口。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FPGA 播控终端 · 图形控制页</title>
+<style>
+:root{
+  --bg:#0d1220; --panel:#161e30; --panel2:#1d2840; --line:#2a3a5c;
+  --txt:#e8eefc; --dim:#8fa1c7; --acc:#39d98a; --warn:#ffd24d;
+  --bad:#ff5d6c; --blue:#5ea0ff; --purple:#b48cff;
+}
+*{box-sizing:border-box; margin:0; padding:0;}
+body{background:var(--bg); color:var(--txt);
+  font-family:system-ui,"Microsoft YaHei","PingFang SC",sans-serif;
+  font-size:15px; line-height:1.55; padding-bottom:200px;}
+a{color:var(--blue);}
+.wrap{max-width:1280px; margin:0 auto; padding:0 16px;}
+
+/* ---------- 顶部状态条 ---------- */
+header{position:sticky; top:0; z-index:50; background:#0a0f1bdd;
+  backdrop-filter:blur(6px); border-bottom:1px solid var(--line);}
+.statusbar{display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:10px 0;}
+.dot{width:12px;height:12px;border-radius:50%;background:#555;display:inline-block;}
+.dot.on{background:var(--acc); box-shadow:0 0 8px var(--acc);}
+.dot.off{background:var(--bad); box-shadow:0 0 8px var(--bad);}
+.chip{display:inline-flex; align-items:center; gap:6px; background:var(--panel2);
+  border:1px solid var(--line); border-radius:20px; padding:3px 12px; font-size:13px; color:var(--dim);}
+.chip b{color:var(--txt); font-weight:600;}
+.chip.act b{color:var(--acc);}
+.brand{font-size:17px; font-weight:700; letter-spacing:1px; margin-right:6px;}
+.brand small{color:var(--dim); font-weight:400; font-size:12px;}
+#reconnect{display:none; background:var(--bad); color:#fff; border:0; border-radius:8px;
+  padding:6px 14px; font-size:14px; cursor:pointer;}
+html.offline .chip{filter:grayscale(1); opacity:.5;}
+html.offline #reconnect{display:inline-block;}
+
+/* ---------- 布局 ---------- */
+main{display:grid; grid-template-columns:minmax(400px,1fr) minmax(430px,1.15fr); gap:16px; padding:16px 0;}
+@media (max-width:960px){ main{grid-template-columns:1fr;} }
+section{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px;}
+h2{font-size:15px; margin-bottom:4px; display:flex; align-items:center; gap:8px;}
+h2 .tag{font-size:11px; color:var(--dim); font-weight:400;}
+.hint{font-size:12px; color:var(--dim); margin-bottom:10px;}
+
+/* ---------- 通用按钮 ---------- */
+button{font-family:inherit;}
+.big{background:var(--panel2); color:var(--txt); border:1px solid var(--line);
+  border-radius:12px; padding:12px 8px 8px; font-size:16px; font-weight:600; cursor:pointer;
+  min-height:64px; transition:transform .05s, background .15s; position:relative;}
+.big:hover{background:#243252;}
+.big:active{transform:scale(.97);}
+.big small{display:block; font-size:11px; font-weight:400; color:var(--dim); margin-top:4px; line-height:1.35;}
+.big.danger{background:#3a1520; border-color:#7a2533;}
+.big.danger:hover{background:#54202d;}
+.big.go{background:#123524; border-color:#1f5c3a;}
+.big.go:hover{background:#18492f;}
+.flash-ok::after,.flash-bad::after{position:absolute; right:8px; top:6px; font-size:20px; font-weight:800;}
+.flash-ok::after{content:"✓"; color:var(--acc);}
+.flash-bad::after{content:"✗"; color:var(--bad);}
+
+/* 快捷按钮网格 */
+.qgrid{display:grid; grid-template-columns:repeat(3,1fr); gap:10px;}
+
+/* ---------- 文字广播 ---------- */
+textarea{width:100%; background:#0b101d; color:var(--txt); border:1px solid var(--line);
+  border-radius:10px; padding:12px; font-size:19px; font-family:inherit; resize:none; height:64px;}
+textarea:focus{outline:none; border-color:var(--blue);}
+.meter{font-size:13px; color:var(--dim); margin:6px 2px 10px;}
+.meter b{color:var(--txt);} .meter.over b{color:var(--bad);}
+.swatches{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;}
+.sw{width:34px;height:34px;border-radius:8px;border:2px solid transparent; cursor:pointer; position:relative;}
+.sw.sel{border-color:#fff; box-shadow:0 0 0 2px var(--blue);}
+.sw span{position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  font-size:11px; color:#0009; font-weight:700;}
+.row{display:flex; gap:10px; align-items:center; flex-wrap:wrap;}
+.row label{font-size:13px; color:var(--dim);}
+input[type=range]{flex:1; accent-color:var(--acc); min-width:120px;}
+select{background:#0b101d; color:var(--txt); border:1px solid var(--line); border-radius:8px;
+  padding:6px 8px; font-family:inherit; font-size:14px;}
+.btn{background:var(--acc); color:#03230f; border:0; border-radius:10px; padding:10px 18px;
+  font-size:15px; font-weight:700; cursor:pointer; position:relative;}
+.btn:hover{filter:brightness(1.1);}
+.btn.ghost{background:var(--panel2); color:var(--txt); border:1px solid var(--line); font-weight:500;}
+.btn:disabled{opacity:.45; cursor:not-allowed;}
+
+/* ---------- 定时格子 ---------- */
+.tgrid{display:grid; grid-template-columns:repeat(7,1fr); gap:8px; margin-top:8px;}
+.tcell{background:#0b101d; border:1px solid var(--line); border-radius:10px; padding:8px 4px; text-align:center;}
+.tcell div{font-size:12px; color:var(--dim); margin-bottom:4px;}
+.tcell select{width:100%; text-align:center;}
+
+/* ---------- 资源墙 ---------- */
+.wall{display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:12px; margin-top:10px;}
+.card{background:#0b101d; border:1px solid var(--line); border-radius:12px; overflow:hidden; position:relative;}
+.card img{width:100%; height:120px; object-fit:cover; display:block; background:#000;}
+.card .noimg{width:100%; height:120px; display:flex; align-items:center; justify-content:center; color:var(--dim); font-size:30px;}
+.card .meta{padding:8px 10px; font-size:12px;}
+.card .name{font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.card .sub{color:var(--dim);}
+.badge{position:absolute; top:8px; right:8px; font-size:11px; padding:2px 8px; border-radius:10px;
+  background:#0b101dcc; border:1px solid var(--line); color:var(--dim);}
+.badge.ok{color:var(--acc); border-color:#1f5c3a;}
+.pickrow{display:flex; align-items:center; gap:8px; padding:8px 10px; border-top:1px solid var(--line);
+  font-size:13px; cursor:pointer; background:#111827; user-select:none;}
+.pickrow input{width:17px; height:17px; accent-color:var(--acc);}
+.maskbar{display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:12px;
+  background:#0b101d; border:1px dashed var(--line); border-radius:10px; padding:10px 12px; font-size:13px;}
+.maskbar code{color:var(--warn); font-size:14px;}
+.empty{color:var(--dim); font-size:13px; padding:18px 8px; text-align:center;}
+
+/* ---------- 导入 ---------- */
+.chiplist{display:flex; flex-wrap:wrap; gap:6px; margin:10px 0;}
+.chipf{background:#0b101d; border:1px solid var(--line); border-radius:8px; padding:3px 10px; font-size:12px; color:var(--dim);}
+.chipf.vid{border-color:#5a3a7a; color:var(--purple);}
+.chipf.noff{border-color:#7a2533; color:var(--bad);}
+
+/* ---------- 回执流 ---------- */
+#logbox{grid-column:1 / -1;}
+#log{height:150px; overflow-y:auto; background:#080d18; border:1px solid var(--line);
+  border-radius:10px; padding:8px 10px; font-family:Consolas,"Courier New",monospace; font-size:12.5px;}
+.ln{display:flex; gap:10px; padding:1px 0;}
+.ln .t{color:#4c5d82; flex:0 0 92px;}
+.ln .d{flex:0 0 14px;}
+.ln.tx .m{color:var(--blue);}
+.ln.ok .m{color:var(--acc);}
+.ln.err .m,.ln .m.errline{color:var(--bad);}
+.ln.v2 .m{color:var(--purple);}
+.ln.sys .m{color:var(--dim);}
+
+/* ---------- 高级抽屉 ---------- */
+#drawer{position:fixed; top:0; right:-380px; width:360px; height:100vh; background:var(--panel);
+  border-left:1px solid var(--line); z-index:99; transition:right .25s; padding:18px; overflow-y:auto;}
+#drawer.open{right:0;}
+#advBtn{margin-left:auto;}
+.toast{position:fixed; left:50%; transform:translateX(-50%); bottom:24px; background:#2b1120;
+  border:1px solid var(--bad); color:#ffd7dd; padding:10px 20px; border-radius:10px; z-index:120;
+  font-size:14px; display:none; max-width:80vw;}
+.footer{grid-column:1 / -1; color:#3d4c6e; font-size:12px; text-align:center; padding-top:2px;}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap statusbar">
+    <span class="brand">📺 FPGA 播控终端 <small>图形控制页 · 告别 XCOM</small></span>
+    <span class="chip"><span class="dot" id="connDot"></span><b id="connTxt">连接中…</b></span>
+    <span class="chip" id="cScan">扫描 <b>–</b></span>
+    <span class="chip" id="cAuto">轮播 <b>–</b></span>
+    <span class="chip" id="cImg">图号 <b>–</b></span>
+    <span class="chip" id="cScr">屏有效 <b>–</b></span>
+    <span class="chip" id="cBusy">忙 <b>–</b></span>
+    <span class="chip" id="cCnt">已执行命令 <b>–</b></span>
+    <button id="reconnect" onclick="doReconnect()">⟳ 重连</button>
+    <button class="btn ghost" id="advBtn" onclick="toggleDrawer()">🔧 高级</button>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ① 大屏快捷按钮 -->
+  <section>
+    <h2>🎮 大屏快捷操作 <span class="tag">点一下 = 发一条命令，✓/✗ 是板子的回执</span></h2>
+    <p class="hint">不用记命令，按按钮就行。每个按钮下面写清了“会发生什么”。</p>
+    <div class="qgrid">
+      <button class="big go" data-cmd="PREV">⏮ 上一张<small>退回到上一张图（循环，第一张的"上一张"是最后一张）</small></button>
+      <button class="big go" data-cmd="NEXT">⏭ 下一张<small>立刻切到下一张图</small></button>
+      <button class="big" data-cmd="AUTO" id="btnAuto">🔁 轮播开/关<small>自动定时换图；再按一次停</small></button>
+      <button class="big go" data-cmd="PLYALL">🖼 全部图播放<small>卡里扫到的图全部进轮播</small></button>
+      <button class="big danger" data-cmd="EMG1">🚨 应急 1<small>大屏弹应急横幅＋蜂鸣器</small></button>
+      <button class="big danger" data-cmd="EMG2">🚨 应急 2<small>第二套应急文案＋蜂鸣器</small></button>
+      <button class="big danger" data-cmd="EMG3">🚨 应急 3<small>第三套应急文案＋蜂鸣器</small></button>
+      <button class="big" data-cmd="CLR">🔙 恢复常态<small>退出应急横幅，回到正常播放</small></button>
+      <button class="big" data-cmd="SCAN7">🔍 快扫 7 张<small>让板子从卡里扫描 7 张图（v10.1：扫到没有就自动收工，约 3 秒）</small></button>
+      <button class="big" data-cmd="SCAN4">🔍 扫回 4 张<small>扫描深度改回默认 4 张</small></button>
+      <button class="big" data-cmd="SCAN32">🔎 扫满 32 张<small>链式连扫登记卡里的图（约 5~8 秒）· ⚠多分辨率图请先开【智能缩放】再扫，否则缩放图不会被登记</small></button>
+      <button class="big go" data-cmd="VID 8">🎬 动感画报 8 帧<small>把最近登记的 8 帧当视频连播，约 0.6 秒一帧（先点“扫满 32 张”）</small></button>
+      <button class="big" data-cmd="VID 0">⏸ 退出画报<small>回到普通轮播节奏</small></button>
+      <button class="big" data-cmd="WHY?" id="btnWhy">🩺 一键体检<small>读板子的“黑匣子”：最近卡住的 3 次现场记录，回执会显示在下面日志里</small></button>
+    </div>
+    <!-- v10.2 精细播控：自定义扫描张数 / 文件区间 / 候选名单（板子同款能力，网页同步） -->
+    <div style="display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;font-size:14px">
+      <span>🔢 扫描 <b>1~32</b> 任意张数
+        <input id="scanN" type="number" min="1" max="32" value="12" style="width:52px">
+        <button class="big go" id="btnScanN" style="padding:4px 10px;font-size:13px">扫这么多</button>
+        <small class="hint">不是只有 4/7/32 三档了</small>
+      </span>
+      <span>🎞 只播区间：从第
+        <input id="rngA" type="number" min="1" max="9" value="1" style="width:44px"> 张起连播
+        <input id="rngB" type="number" min="1" max="9" value="8" style="width:44px"> 张
+        <button class="big go" id="btnRng" style="padding:4px 10px;font-size:13px">播这段</button>
+        <small class="hint">恢复全部＝点"全部图播放"</small>
+      </span>
+      <span>📋 板子候选名单
+        <button class="big" id="btnList" style="padding:4px 10px;font-size:13px">查一下 (LIST?)</button>
+        <b id="listInfo">未查询</b>
+        <small class="hint">卡不拔出电脑也看得到板子登记了几张、正在播第几张</small>
+      </span>
+    </div>
+  </section>
+
+  <!-- ② 文字广播 -->
+  <section>
+    <h2>📢 文字广播 <span class="tag">发到大屏第 2 行</span></h2>
+    <p class="hint">中文、英文、数字、标点随便混排。一行最多 <b>22 格</b>：一个中文占 1 格，一个字母/标点也占 1 格。</p>
+    <textarea id="msgText" placeholder="例如：观众朋友请注意 17:30 开始清场" maxlength="22"></textarea>
+    <div class="meter" id="msgMeter">已用 <b>0</b>/22 格</div>
+    <div class="swatches" id="swatches"></div>
+    <div class="row" style="margin-bottom:12px">
+      <button class="btn" id="msgSend" onclick="sendMsg()">📡 发送到大屏</button>
+      <span class="hint" style="margin:0">会先发 <code>COL 颜色</code> 再发 <code>MSG 文字</code>（两条命令）</span>
+    </div>
+    <div class="row">
+      <label>🔊 音量 <b id="volTxt">5</b>/9</label>
+      <input type="range" id="volRange" min="0" max="9" value="5">
+    </div>
+    <p class="hint" style="margin-top:6px">0＝静音，9＝最大（松手即生效，发 <code>VOL n</code>）</p>
+  </section>
+
+  <!-- ③ 节奏与单图定时 -->
+  <section>
+    <h2>⏱ 轮播节奏 <span class="tag">多久换一张</span></h2>
+    <div class="row">
+      <label>全局每张停留</label>
+      <select id="spdSel">
+        <option value="" selected>选秒数…</option>
+      </select>
+      <span class="hint" style="margin:0">发 <code>SPD n</code>（1~9 秒，对轮播全部生效）</span>
+    </div>
+    <p class="hint" style="margin-top:10px">单独给某一张图定时（发 <code>T 编号 秒数</code>，盖过全局值）：</p>
+    <div class="tgrid" id="tgrid"></div>
+  </section>
+
+  <!-- v10.3 画面工坊：板子新增的 6 条效果命令（BR/GN/FD/CK/VU/SR），控件与发送逻辑仿照音量/节奏区 -->
+  <section>
+    <h2>🎛 画面工坊 <span class="tag">亮度·转场·时钟·频谱·字幕（v10.3）</span></h2>
+    <p class="hint">每个控件动一下就发一条命令，大屏立刻见效；✓/✗ 代表板子收下了。</p>
+    <div class="row">
+      <label>🔆 亮度 <b id="brTxt">5</b>/9</label>
+      <input type="range" id="brRange" min="0" max="9" value="5" title="发 BR n：0 最暗，9 最亮，5 标准">
+    </div>
+    <p class="hint" style="margin-top:4px">一句话：屏幕嫌暗就拉高、嫌刺眼就拉低，<b>5 是标准档</b>（发 <code>BR n</code>）。</p>
+    <div class="row" style="margin-top:8px">
+      <label>✨ 对比度 <b id="gnTxt">5</b>/9</label>
+      <input type="range" id="gnRange" min="0" max="9" value="5" title="发 GN n：画面增强强度，5 标准">
+    </div>
+    <p class="hint" style="margin-top:4px">一句话：数值越大画面越“通透提神”，<b>5 是标准档</b>（发 <code>GN n</code>）。</p>
+    <div class="row" style="margin-top:10px">
+      <label>🌀 换图转场</label>
+      <select id="fdSel" title="发 FD n：0直切 1淡入 2左→右擦拭 3百叶窗">
+        <option value="0" selected>0 · 直切（瞬间换）</option>
+        <option value="1">1 · 淡入</option>
+        <option value="2">2 · 左→右擦拭</option>
+        <option value="3">3 · 百叶窗</option>
+      </select>
+      <span class="hint" style="margin:0">一句话：下一张图“怎么出现”（发 <code>FD n</code>）</span>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <label>📜 字幕速度</label>
+      <select id="srSel" title="发 SR n：0停 1..4 像素/帧">
+        <option value="0">0 · 停住不滚</option>
+        <option value="1">1 · 慢</option>
+        <option value="2" selected>2 · 适中</option>
+        <option value="3">3 · 快</option>
+        <option value="4">4 · 最快</option>
+      </select>
+      <span class="hint" style="margin:0">一句话：底部字幕滚多快，越大越快（发 <code>SR n</code>）</span>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn ghost" id="btnCk">🕐 实时时钟：关</button>
+      <button class="btn ghost" id="btnVu">🎵 音频频谱：关</button>
+      <button class="btn ghost" id="btnSc" title="扩展3：任意分辨率自动缩放">🔍 智能缩放：关</button>
+    </div>
+    <p class="hint" style="margin-top:6px">时钟＝大屏右上角显示当前时间；频谱＝底部随声音跳动的柱条；缩放＝卡里<b>任意分辨率</b>的图（如 1280×720、400×800）自动等比缩放到屏幕中央（恒定铺满 640×480 帧缓冲，黑边居中，不会花屏；b-19 起"极扁条带"也走缩放，不再特殊直通）。点一下切开关（发 <code>CK/VU/SC 0/1</code>）；<b>SC 开了以后按一次「下一张」才生效</b>（缩放发生在换图时刻）；<b>若卡里有非 640×480 的图（多分辨率演示卡），必须先开缩放、再点【扫满 32 张】</b>——登记发生在扫描那一刻，顺序反了非标准图进不了候选表（重扫一次即恢复）。按钮记的是网页最后一次点击，板子断电重启后回到默认。</p>
+  </section>
+
+  <!-- ④ 导入工坊 -->
+  <section id="secImport">
+    <h2>🧳 导入工坊 <span class="tag">手机照片 → 板卡能播的 BMP</span></h2>
+    <p class="hint">选任意图片（jpg/png/gif/bmp/webp），自动裁成 640×480 标准 BMP；视频（mp4/avi/mkv）抽帧成连拍图，一段最多 <b>32 帧</b>——配合上面的「🔎 扫满 32 张 → 🎬 动感画报」就是 <b>约 0.6 秒/帧的动态视频档</b>。<span id="ffTip" style="color:var(--warn)"></span></p>
+    <div class="row">
+      <button class="btn ghost" onclick="pickFiles()">📁 选择文件…（可多选）</button>
+      <label>摆放方式</label>
+      <select id="fitSel">
+        <option value="contain" selected>完整保留＋黑边</option>
+        <option value="cover">铺满裁剪</option>
+      </select>
+      <button class="btn" id="convBtn" onclick="doImport()" disabled>⚙ 转换</button>
+    </div>
+    <div class="chiplist" id="pickList"><span class="chipf">还没选文件</span></div>
+    <div class="row" id="cardRow" style="display:none">
+      <button class="btn go" style="background:#1c7a45;color:#fff" onclick="copyToCard()">💾 一键拷进 TF 卡</button>
+      <button class="btn ghost" onclick="openCard()">📂 打开卡目录</button>
+      <span class="hint" style="margin:0" id="cardHint"></span>
+    </div>
+    <div id="impResult" class="hint" style="margin-top:8px; white-space:pre-wrap"></div>
+  </section>
+
+  <!-- ⑤ 资源墙（核心） -->
+  <section id="secWall" style="grid-column:1 / -1">
+    <h2>🖼 资源墙 <span class="tag" id="wallTag">SD 卡 / 输出目录里的全部图片和视频</span></h2>
+    <p class="hint">这就是“SD 卡里到底有什么”的图版答案 —— 不用再 dir 了。勾选几张 = 只让板子轮播这几张（自动算 <code>PLY</code> 掩码）。</p>
+    <div id="wallNote" style="display:none;margin:6px 0;padding:8px 12px;border-left:4px solid #ffd24d;background:#2a2410;border-radius:6px;font-size:13px;white-space:pre-wrap"></div>
+    <div class="row">
+      <button class="btn ghost" onclick="loadWall()">⟳ 刷新</button>
+      <button class="btn ghost" onclick="pickDir()">📂 选择文件夹…</button>
+      <button class="btn ghost" onclick="openFolder()">📂 打开输出文件夹</button>
+      <span class="hint" id="wallRoot" style="margin:0"></span>
+    </div>
+    <div class="wall" id="wall"></div>
+    <div class="maskbar" id="maskbar" style="display:none">
+      <span>已勾 <b id="mSel">0</b> 张 · 掩码 <code id="mHex">0x00</code></span>
+      <button class="btn" onclick="applyMask()">▶ 就播这些</button>
+      <button class="btn ghost" onclick="checkAll(true)">全选</button>
+      <button class="btn ghost" onclick="checkAll(false)">清空</button>
+      <span class="hint" style="margin:0" id="mTip"></span>
+    </div>
+  </section>
+
+  <!-- ⑥ 回执流 -->
+  <section id="logbox">
+    <h2>🧾 回执流 <span class="tag">板子说的每句话都在这（红色＝出错）</span></h2>
+    <div id="log"></div>
+  </section>
+
+  <div class="footer">上位机 console.py ⇄ UART 115200-8N1 ⇄ 板子 msg_ink v9.1 · 本页零外部资源，断网可用</div>
+</main>
+
+<!-- ⑦ 高级抽屉：给极客留的原文收发框 -->
+<aside id="drawer">
+  <h2 style="margin-bottom:10px">🔧 高级 · 原文收发 <span class="tag">直接对板子喊话</span></h2>
+  <p class="hint">发什么板上见什么（自动补行尾换行）。小白请回来点按钮，这里发错板子会回 ERR。</p>
+  <div class="row" style="margin-bottom:10px">
+    <input id="rawIn" style="flex:1; background:#0b101d;border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:8px;font-family:Consolas,monospace" placeholder="例如：INFO? 或 PLY 7F" onkeydown="if(event.key==='Enter')sendRaw()">
+    <button class="btn" onclick="sendRaw()">发送</button>
+  </div>
+  <div class="row" style="margin-bottom:10px">
+    <button class="btn ghost" onclick="statRaw()">查 STAT?（工具格式）</button>
+  </div>
+  <div id="rawLog" style="background:#080d18;border:1px solid var(--line);border-radius:10px;padding:8px;font-family:Consolas,monospace;font-size:12.5px;height:300px;overflow-y:auto"></div>
+  <p class="hint" style="margin-top:10px">提示：INFO? / STAT? 是查询，不会改变大屏、也不计命令数。</p>
+  <button class="btn ghost" onclick="toggleDrawer()" style="margin-top:6px">关闭</button>
+</aside>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============ 工具函数 ============ */
+const $ = id => document.getElementById(id);
+async function api(action, payload = {}) {
+  const res = await fetch('/api', {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(Object.assign({action}, payload))});
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+function toast(msg, ms=3500){ const t=$('toast'); t.textContent=msg; t.style.display='block';
+  clearTimeout(t._h); t._h=setTimeout(()=>t.style.display='none', ms); }
+function flash(btn, ok){ const c=ok?'flash-ok':'flash-bad'; btn.classList.add(c);
+  setTimeout(()=>btn.classList.remove(c), 1200); }
+/* 数“整格”：中文/英文/标点都算 1（Array.from 正确处理生僻字/代理对） */
+const cells = s => Array.from(s).length;
+
+/* ============ 状态轮询（2Hz，发 INFO?） ============ */
+let logSeq = 0, pollBusy = false, missCnt = 0, HELLO = {};
+async function pollLoop(){
+  if (pollBusy) return; pollBusy = true;
+  try {
+    const r = await api('poll', {since: logSeq});
+    logSeq = r.log_seq || logSeq;
+    (r.log||[]).forEach(addLog);
+    missCnt = 0;
+    document.documentElement.classList.remove('offline');
+    const s = r.status;
+    $('connDot').className = 'dot ' + (r.connected ? 'on':'off');
+    $('connTxt').textContent = r.connected ? (HELLO.mock?'已连接（假板子演示）':'已连接 COM口') : '已断开';
+    if (s) {
+      chipSet('cScan', s.scan_ok ? '✓ 好':'未扫', s.scan_ok);
+      chipSet('cAuto', s.auto_play ? '▶ 自动':'✕ 手动', s.auto_play);
+      chipSet('cImg', '第' + (s.img + 1) + '张·低2位', true);   // 协议只报 2 位图号，0..3 循环
+      chipSet('cScr', s.screen_valid ? '✓ 有画面':'✕ 无', s.screen_valid);
+      chipSet('cBusy', s.load_busy ? '⏳ 忙':'空闲', !s.load_busy);
+      $('cCnt').innerHTML = '已执行命令 <b>' + s.count + '</b>';
+    }
+  } catch(e) {
+    if (++missCnt >= 3) {
+      document.documentElement.classList.add('offline');
+      $('connDot').className = 'dot off';
+      $('connTxt').textContent = '连不上控制台服务';
+    }
+  } finally { pollBusy = false; }
+}
+function chipSet(id, txt, act){ const el=$(id), b=el.querySelector('b'); b.textContent=txt;
+  el.classList.toggle('act', !!act); }
+async function doReconnect(){
+  const r = await api('reconnect'); toast(r.ok ? String(r.resp||r.ok) : (r.error||'重连失败'));
+  missCnt = 3; }
+
+/* ============ 快捷按钮 ============ */
+document.querySelectorAll('[data-cmd]').forEach(btn => {
+  btn.onclick = async () => {
+    btn.disabled = true;
+    try {
+      const r = await api('cmd', {cmd: btn.dataset.cmd});
+      flash(btn, !!r.ok);
+      if (btn.dataset.cmd === 'WHY?') toast('🩺 黑匣子：' + (r.resp || '无回执') + '（W 后三个字节=最近3次卡住现场，末列=累计次数；全 0 = 没卡过）');
+      else if (!r.ok) toast('板子回：' + (r.resp || r.error || '失败'));
+      else if (/^SCAN(7|4|32)$/i.test(btn.dataset.cmd)) toast('已发起重扫：画面保持不黑，约 3~8 秒后右上角状态灯恢复“健康”');
+    } catch(e){ flash(btn, false); toast('发送失败：' + e); }
+    finally { btn.disabled = false; pollLoop(); }
+  };
+});
+
+/* ============ v10.2 精细播控（自定义扫描张数 / 区间 / 名单） ============ */
+async function sendCmd(c, okMsg){
+  const r = await api('cmd', {cmd: c});
+  toast(r.ok ? (okMsg || (c + ' ✓')) : ('发送 ' + c + ' 失败：' + (r.error || r.resp || '板子无应答')));
+  if (r.ok) pollLoop();
+  return r;
+}
+$('btnScanN').onclick = async () => {
+  const n = parseInt($('scanN').value, 10);
+  if (!(n >= 1 && n <= 32)) return toast('扫描张数要填 1~32 的整数');
+  await sendCmd('SCAN' + n, '已发起扫描 ' + n + ' 张：卡里没这么多会自动收工，画面不黑');
+};
+$('btnRng').onclick = async () => {
+  const a = parseInt($('rngA').value, 10), b = parseInt($('rngB').value, 10);
+  if (!(a >= 1 && a <= 9 && b >= 1 && b <= 9)) return toast('起点和连播张数都是 1~9（如从第 5 张连播 8 张 = RNG58）');
+  await sendCmd('RNG' + a + b, '只播第 ' + a + '~' + (a + b - 1) + ' 张（共 ' + b + ' 张），已自动退出画报');
+};
+$('btnList').onclick = async () => {
+  const r = await api('cmd', {cmd: 'LIST?'});
+  const el = $('listInfo');
+  if (r.ok && String(r.resp || '').startsWith('L')) {
+    const p = r.resp.trim().split(/\s+/);
+    const f = parseInt(p[1], 16), cur = parseInt(p[2], 16), d = parseInt(p[3], 16);
+    el.textContent = '登记 ' + f + ' 张 · 正在播第 ' + (cur + 1) + ' 张 · 深度 ' + d;
+    toast('📋 板子现在登记了 ' + f + ' 张候选（扫描深度 ' + d + '），当前播第 ' + (cur + 1) + ' 张');
+  } else { el.textContent = '查询失败'; toast('LIST? 失败：' + (r.error || r.resp || '无应答')); }
+  pollLoop();
+};
+
+/* ============ 文字广播 ============ */
+const COLS = [
+  ['白', '#ffffff', 0], ['红', '#ff5252', 1], ['绿', '#3ddc84', 2], ['黄', '#ffd24d', 3],
+  ['青', '#39d9ff', 4], ['品红', '#ff5df1', 5], ['蓝', '#5e9bff', 6], ['橙', '#ffa040', 7]];
+let selCol = null;
+function buildSwatches(){
+  $('swatches').innerHTML = '';
+  COLS.forEach(([name, css, i]) => {
+    const d = document.createElement('div');
+    d.className = 'sw'; d.style.background = css;
+    d.title = name + '（COL ' + i + '）';
+    d.innerHTML = '<span>' + i + '</span>';
+    d.onclick = () => { selCol = (selCol === i ? null : i);
+      document.querySelectorAll('.sw').forEach((x,k)=>x.classList.toggle('sel', selCol===COLS[k][2])); };
+    $('swatches').appendChild(d);
+  });
+}
+$('msgText').addEventListener('input', () => {
+  const n = cells($('msgText').value);
+  const m = $('msgMeter');
+  m.innerHTML = '已用 <b>' + n + '</b>/22 格' + (selCol!==null ? ' · 颜色：' + COLS.filter(c=>c[2]===selCol)[0][0] : ' · 颜色：不改');
+  m.classList.toggle('over', n > 22);
+  $('msgSend').disabled = (n === 0 || n > 22);
+});
+$('msgSend').disabled = true;
+async function sendMsg(){
+  const text = $('msgText').value;
+  const n = cells(text);
+  if (!n || n > 22) { toast('空的或超 22 格，发不了'); return; }
+  const btn = $('msgSend'); btn.disabled = true;
+  try {
+    const r = await api('msg', {text, col: selCol});
+    flash(btn, !!r.ok);
+    if (!r.ok) toast(r.error || '板子没收下');
+    else toast('已上大屏：' + text);
+  } catch(e){ flash(btn, false); toast('发送失败：' + e); }
+  finally { btn.disabled = false; pollLoop(); }
+}
+$('volRange').addEventListener('change', async () => {
+  const v = $('volRange').value; $('volTxt').textContent = v;
+  const r = await api('cmd', {cmd: 'VOL ' + v});
+  if (!r.ok) toast('音量没改成：' + (r.resp || r.error));
+});
+
+/* ============ 节奏 / 单图定时 ============ */
+(function buildTimers(){
+  for (let n=1; n<=9; n++){ const o=document.createElement('option'); o.value=n; o.textContent=n+' 秒'; $('spdSel').appendChild(o); }
+  $('spdSel').addEventListener('change', async () => {
+    const n = $('spdSel').value; if (!n) return;
+    const r = await api('cmd', {cmd: 'SPD ' + n});
+    if (!r.ok) toast('SPD 失败：' + (r.resp || r.error));
+  });
+  for (let i=0; i<7; i++){
+    const d = document.createElement('div'); d.className='tcell';
+    d.innerHTML = '<div>第 ' + (i+1) + ' 张</div>';
+    const s = document.createElement('select');
+    s.innerHTML = '<option value="" selected>默认</option>' +
+      Array.from({length:9},(_,k)=>'<option>'+(k+1)+'</option>').join('');
+    s.addEventListener('change', async () => {
+      const n = s.value; if (!n) return;
+      const r = await api('cmd', {cmd: 'T ' + i + ' ' + n});
+      if (!r.ok) toast('T ' + i + ' 失败：' + (r.resp || r.error));
+    });
+    d.appendChild(s); $('tgrid').appendChild(d);
+  }
+})();
+
+/* ============ v10.3 画面工坊（BR/GN/FD/CK/VU/SR，发送方式同 VOL/SPD） ============ */
+async function fxCmd(c, what){
+  const r = await api('cmd', {cmd: c});
+  if (!r.ok) toast(what + '没发出去：' + (r.resp || r.error || '板子没应答'));
+  else pollLoop();
+  return r;
+}
+$('brRange').addEventListener('change', () => {
+  const v = $('brRange').value; $('brTxt').textContent = v;
+  fxCmd('BR ' + v, '亮度 ' + v);
+});
+$('gnRange').addEventListener('change', () => {
+  const v = $('gnRange').value; $('gnTxt').textContent = v;
+  fxCmd('GN ' + v, '对比度 ' + v);
+});
+$('fdSel').addEventListener('change', () => {
+  const v = $('fdSel').value;
+  fxCmd('FD ' + v, '转场改成第 ' + v + ' 种');
+});
+$('srSel').addEventListener('change', () => {
+  const v = $('srSel').value;
+  fxCmd('SR ' + v, '字幕速度 ' + v);
+});
+let ckOn = false, vuOn = false, scOn = false;
+function fxSwRender(){
+  $('btnCk').textContent = '🕐 实时时钟：' + (ckOn ? '开' : '关');
+  $('btnVu').textContent = '🎵 音频频谱：' + (vuOn ? '开' : '关');
+  $('btnSc').textContent = '🔍 智能缩放：' + (scOn ? '开' : '关');
+}
+$('btnCk').onclick = async () => {
+  const want = !ckOn;
+  if ((await fxCmd('CK ' + (want ? 1 : 0), '时钟开关')).ok) { ckOn = want; fxSwRender(); }
+};
+$('btnVu').onclick = async () => {
+  const want = !vuOn;
+  if ((await fxCmd('VU ' + (want ? 1 : 0), '频谱开关')).ok) { vuOn = want; fxSwRender(); }
+};
+$('btnSc').onclick = async () => {
+  const want = !scOn;
+  if ((await fxCmd('SC ' + (want ? 1 : 0), '缩放开关')).ok) { scOn = want; fxSwRender();
+    toast(want ? '智能缩放已开：按一次「下一张」让新图按缩放装载' : '智能缩放已关：回到老规则（只装 640×480，其余尺寸拒装快跳）'); }
+};
+fxSwRender();
+
+/* ============ 资源墙 ============ */
+let WALL = {items: [], checked: new Set()};
+async function loadWall(){
+  try {
+    const r = await api('assets');
+    WALL.items = r.items || [];
+    $('wallRoot').innerHTML = '目录：<b>' + r.root + '</b>' +
+      (r.root_kind==='card' ? ' <b style="color:var(--acc)">＝ TF 卡里正在播的图！</b>' :
+       r.root_kind==='custom' ? '（自选文件夹）' : '（转换输出区）');
+    $('wallTag').textContent = r.root_kind==='card' ? 'TF 卡根目录 · 板子吃的就是这些' :
+                               '全部图片与视频素材';
+    $('cardRow').style.display = r.card ? 'flex' : 'none';
+    if (r.card) $('cardHint').textContent =
+      '已检测到卡 ' + (r.card.root || '?') + '（根目录 ' + (r.card.files || []).length +
+      ' 个 BMP）· 源＝电脑输出目录 · 拷完插回板子点【扫满 32 张】重扫';
+    // v10.2：诚实标注 —— 墙里看的到底是卡还是电脑文件夹？板子只吃卡！
+    const note = $('wallNote');
+    if (r.root_kind === 'card') {
+      note.style.display = 'none';
+    } else {
+      note.style.display = 'block';
+      note.innerHTML = '⚠️ 现在显示的是<b>' + (r.root_kind==='custom' ? '自选文件夹' : '电脑上的转换输出区') +
+        '</b>，<b>不是 TF 卡</b>。板子播的图永远只来自卡——这里转好的图必须拷进卡才会出现在大屏。' +
+        (r.card ? ' 检测到读卡器里的卡：点上方【💾 一键拷进 TF 卡】即可。'
+                : ' 卡现在多半插在板子上，电脑读不到：把卡插到电脑（读卡器）再来拷，或点【📂 打开输出文件夹】手动拷。' +
+                  ' 想先看看板子上现在登记了几张图：上面【📋 查一下 (LIST?)】。');
+    }
+    renderWall();
+  } catch(e){ toast('资源墙加载失败：' + e); }
+}
+function renderWall(){
+  const w = $('wall'); w.innerHTML = '';
+  const imgs = WALL.items.filter(i => i.kind === 'image');
+  if (!WALL.items.length){
+    w.innerHTML = '<div class="empty">这个目录还没有素材。<br>用上面「选择文件夹」指到放图的目录，或去左边「导入工坊」转几张。</div>';
+    $('maskbar').style.display = 'none'; return;
+  }
+  WALL.items.forEach((it) => {
+    const c = document.createElement('div'); c.className = 'card';
+    const thumb = it.thumb ? '<img src="' + it.thumb + '" alt="" loading="lazy">'
+                           : '<div class="noimg">' + (it.kind==='video' ? '🎬' : '🖼') + '</div>';
+    const play = it.kind==='video'
+      ? '<span class="badge" style="color:var(--purple)">视频·需导入工坊抽帧</span>'
+      : it.playable ? '<span class="badge ok">板卡可播</span>' : '<span class="badge">非640×480·需转换</span>';
+    c.innerHTML = thumb + play +
+      '<div class="meta"><div class="name" title="' + it.name + '">' + it.name + '</div>' +
+      '<div class="sub">' + it.size_kb + ' KB' +
+      (it.board_index != null ? ' · 板上第 ' + (it.board_index+1) + ' 张' : '') + '</div></div>';
+    if (it.kind === 'image') {
+      const row = document.createElement('label'); row.className = 'pickrow';
+      const cb = document.createElement('input'); cb.type = 'checkbox';
+      cb.checked = WALL.checked.has(it.board_index);
+      cb.onchange = () => { cb.checked ? WALL.checked.add(it.board_index) : WALL.checked.delete(it.board_index); updMask(); };
+      row.appendChild(cb);
+      row.appendChild(document.createTextNode(' 设为轮播子集（第 ' + (it.board_index+1) + ' 张）'));
+      c.appendChild(row);
+    }
+    w.appendChild(c);
+  });
+  updMask();
+}
+function maskNow(){ let m = 0; WALL.checked.forEach(i => m |= (1<<i)); return m; }
+function plyToken(mask){
+  if (mask <= 99) return ('0' + mask).slice(-2);
+  return mask.toString(16).toUpperCase();   // 100..127：十六进制字母形式
+}
+function updMask(){
+  const bar = $('maskbar');
+  bar.style.display = WALL.items.some(i=>i.kind==='image') ? 'flex' : 'none';
+  const m = maskNow();
+  $('mSel').textContent = WALL.checked.size;
+  $('mHex').textContent = '0x' + m.toString(16).toUpperCase().padStart(2,'0') +
+    (m ? ' → PLY ' + plyToken(m) : '');
+  const tips = {100:'100~105',101:'100~105',102:'100~105',103:'100~105',104:'100~105',105:'100~105',
+    112:'112~121',113:'112~121',114:'112~121',115:'112~121',116:'112~121',117:'112~121',
+    118:'112~121',119:'112~121',120:'112~121',121:'112~121'};
+  $('mTip').textContent = tips[m] ? ('⚠ 掩码 '+m+' 落在协议歧义区('+tips[m]+')，可能发不出去')
+    : (m ? '发 PLY 命令只轮播勾选的这几张' : '勾几张试试');
+}
+async function applyMask(){
+  const m = maskNow();
+  if (!m){ toast('先勾几张图'); return; }
+  const r = await api('ply', {mask: m});
+  if (r.ok) toast('板子收下了：PLY ' + (r.token || plyToken(m)));
+  else toast(r.error || ('PLY 失败：' + (r.resp || '板子回 ERR')));
+  pollLoop();
+}
+function checkAll(on){
+  WALL.checked = new Set();
+  if (on) WALL.items.forEach(i => { if (i.kind==='image' && i.board_index!=null) WALL.checked.add(i.board_index); });
+  renderWall();
+}
+async function pickDir(){
+  const r = await api('pick', {mode:'dir'});
+  if (r.ok) loadWall();
+}
+
+/* ============ 导入工坊 ============ */
+let PICKED = [];
+async function initHello(){
+  try {
+    HELLO = await api('hello');
+    if (!HELLO.ffmpeg) $('ffTip').textContent = '（本机未检测到 ffmpeg：视频抽帧已禁用，图片照常）';
+    else $('ffTip').textContent = '';
+  } catch(e){}
+}
+async function pickFiles(){
+  const r = await api('pick', {mode:'files'});
+  if (!r.ok){ toast('没选文件'); return; }
+  PICKED = r.paths;
+  const l = $('pickList'); l.innerHTML = '';
+  const hasVid = PICKED.some(p => /\.(mp4|avi|mkv|mov|wmv|flv|webm)$/i.test(p));
+  PICKED.forEach(p => {
+    const vid = /\.(mp4|avi|mkv|mov|wmv|flv|webm)$/i.test(p);
+    const s = document.createElement('span');
+    s.className = 'chipf' + (vid ? (HELLO.ffmpeg ? ' vid' : ' noff') : '');
+    s.textContent = p.split(/[\\/]/).pop() + (vid ? (HELLO.ffmpeg ? ' 🎬' : ' 🎬✕(缺ffmpeg)') : ' 🖼');
+    l.appendChild(s);
+  });
+  $('convBtn').disabled = PICKED.length === 0;
+  $('impResult').textContent = hasVid && !HELLO.ffmpeg ?
+    '列表里有视频但本机没有 ffmpeg —— 只能转图片那部分。' : '';
+}
+async function doImport(){
+  if (!PICKED.length) return;
+  const btn = $('convBtn'); btn.disabled = true; btn.textContent = '⏳ 转换中…';
+  try {
+    const r = await api('import', {paths: PICKED, fit: $('fitSel').value});
+    let msg = '';
+    if (r.converted && r.converted.length) msg += '✓ 生成 ' + r.converted.length + ' 张 BMP：' + r.converted.join(', ');
+    if (r.errors && r.errors.length) msg += (msg?'\n':'') + '⚠ ' + r.errors.map(e=>e.file+'：'+e.why).join('\n⚠ ');
+    if (!msg) msg = r.error || '没转成任何文件';
+    // v10.2 关键引导：转换只写到电脑，板子吃的是 TF 卡 —— 不说清就是"玄学不生效"
+    if (r.converted && r.converted.length) {
+      msg += '\n\n📌 下一步（必须，否则板子看不到新图）：';
+      msg += HELLO.card
+        ? '\n  ① 点下方绿色的【💾 一键拷进 TF 卡】\n  ② 回"大屏快捷操作"点【🔎 扫满 32 张】或自定义张数 → 新图就进轮播了'
+        : '\n  板子读的图在 TF 卡里，电脑现在读不到卡（卡插在板子上）。两条路：\n' +
+          '  A. 把卡拔下来插进电脑（读卡器）→ 本页会自动认出卡片 → 点【一键拷进 TF 卡】→ 卡插回板子 → 点【扫满 32 张】\n' +
+          '  B. 点【📂 打开输出文件夹】把里面的 BMP 用别的办法拷到卡根目录 → 卡插回板子 → 点【扫满 32 张】\n' +
+          '  想看板子目前登记了几张：上面快捷区【📋 查一下 (LIST?)】';
+    }
+    $('impResult').textContent = msg;
+    if (r.converted && r.converted.length) { PICKED = []; $('pickList').innerHTML='<span class="chipf">还没选文件</span>'; await loadWall(); }
+  } catch(e){ $('impResult').textContent = '导入失败：' + e; }
+  finally { btn.disabled = false; btn.textContent = '⚙ 转换'; }
+}
+async function openFolder(){
+  const r = await api('open_folder');
+  toast(r.ok ? '已打开输出文件夹：' + (r.path || '') : ('打开失败：' + (r.error || '')));
+}
+async function openCard(){
+  const r = await api('open_card');
+  toast(r.ok ? '已打开卡目录：' + (r.path || '') : ('打开失败：' + (r.error || '')));
+}
+async function copyToCard(){
+  // v10.2.1：卡在电脑时，资源墙显示的就是卡内容 —— 不能再拿墙上的名字去拷（自拷）。
+  // 统一交给服务器：源=电脑转换输出目录，目标=检测到的卡；不传 names 让服务器列全 BMP。
+  const r0 = await api('assets');
+  if (!r0.card){ toast('没检测到 TF 卡：把卡插进读卡器再点（卡现在多半还在板子上）'); return; }
+  if (!confirm('把电脑输出目录里的 BMP 拷进 TF 卡（目标 ' + (r0.card.root||'?') + '）？\n卡里同名 BMP 会被覆盖！')) return;
+  const r = await api('copy_card', {});
+  if (r.ok){
+    toast('✓ 已拷进卡 ' + (r.copied||[]).length + ' 张 → ' + (r.card_root||''));
+    toast('📌 还差最后一步：卡插回板子后，点【🔎 扫满 32 张】（或自定义张数）重扫，新图才会出现在大屏！', 6000);
+    await loadWall();
+  } else {
+    toast(r.error || ('拷贝失败：' + (r.errors||[]).map(e=>e.file+'：'+e.why).join('; ')), 5000);
+  }
+}
+
+/* ============ 回执流 ============ */
+function addLog(e){
+  const box = $('log');
+  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  const ln = document.createElement('div');
+  ln.className = 'ln ' + (e.cls || e.dir);
+  const mark = e.dir==='tx' ? '→' : e.dir==='rx' ? '←' : '·';
+  const mcls = e.text==='ERR' ? 'm errline' : 'm';
+  ln.innerHTML = '<span class="t">' + e.t + '</span><span class="d">' + mark +
+                 '</span><span class="' + mcls + '">' + esc(e.text) + '</span>';
+  box.appendChild(ln);
+  while (box.children.length > 400) box.removeChild(box.firstChild);
+  if (nearBottom) box.scrollTop = box.scrollHeight;
+}
+function esc(s){ return String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+/* ============ 高级抽屉 ============ */
+function toggleDrawer(){ $('drawer').classList.toggle('open'); }
+function rawLine(t, cls){ const d=document.createElement('div'); d.className='ln '+(cls||'sys');
+  d.innerHTML='<span class="m">'+esc(t)+'</span>'; $('rawLog').appendChild(d);
+  $('rawLog').scrollTop = $('rawLog').scrollHeight; }
+async function sendRaw(){
+  const line = $('rawIn').value.trim(); if (!line) return;
+  rawLine('→ ' + line, 'tx');
+  const r = await api('raw', {line});
+  rawLine('← ' + (r.resp || r.error || '?'), r.ok ? 'ok' : 'err');
+  $('rawIn').value = ''; pollLoop();
+}
+async function statRaw(){
+  rawLine('→ STAT?', 'tx');
+  const r = await api('stat_raw');
+  rawLine('← ' + (r.resp || r.error || '?'), r.ok ? 'v2' : 'err');
+}
+
+/* ============ 启动 ============ */
+buildSwatches();
+initHello();
+loadWall();
+$('msgMeter').innerHTML = '已用 <b>0</b>/22 格';
+setInterval(pollLoop, 500);   // 2Hz 状态轮询（每轮发一次 INFO?）
+pollLoop();
+</script>
+</body>
+</html>

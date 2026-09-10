@@ -1,0 +1,13 @@
+CJK 字模 W25Q64 烧录镜像清单 (convert_font_image.py 自动生成)
+
+目标芯片   : W25Q64 (U33, 板载用户 SPI NOR, 8MiB) —— 勿与 MSPI 上的 boot FLASH W25Q16 混淆
+烧录基地址 : 0x000000 (FPGA 取模地址公式按此假设)
+字库格式   : 标准 HZK16, 282752 字节 = 94区x94位x32B, qu=1..87 有内容
+地址公式   : off = ((qu-1)*94 + (wei-1)) * 32,  qu=高字节-0xA0, wei=低字节-0xA0
+区划速查   : qu 1..9 符号区 | 10..15 未定义(全0) | 16..55 一级汉字 | 56..87 二级汉字 | 88..94 保留(全0)
+
+w25q64_cjk_full.bin   :    8388608 B  md5=dc9eb4d43a86b61566480eefb7b26920  (推荐: 整片一步烧录)
+w25q64_cjk_sector.bin :     286720 B  md5=ace673dd99a7290794587378b853b967  (4KiB 扇区对齐子集)
+hzk16.bin             :     282752 B  md5=5c5c96f5be8d9e0efd056f35810d17d5  (字库本体)
+
+烧录后 FPGA 侧验收: 见 README_cjk_flash.md 第 9 节。

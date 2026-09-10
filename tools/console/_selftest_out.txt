@@ -1,0 +1,87 @@
+﻿[A] FakeSerial 协议单测（字节级）
+  PASS  build_frame NEXT 字节
+  PASS  MSG GB2312 字节级
+  PASS  NEXT -> OK\r\n
+  PASS  小写 next(+CR) -> OK
+  PASS  未知命令 -> ERR 不计数
+  PASS  MSG 中文回 OK 且板子解出文本
+  PASS  INFO? 17字节帧
+  PASS  查询不加计数
+  PASS  COL/SPD/T 合法性
+  PASS  VOL 0-9 合法, A 非法
+  PASS  EMG1/2/3 + CLR
+  PASS  板子 b'PLY 3\n' -> 掩码0x07
+  PASS  板子 b'PLY 7\n' -> 掩码0x7F
+  PASS  板子 b'PLY 07\n' -> 掩码0x07
+  PASS  板子 b'PLY 44\n' -> 掩码0x2C
+  PASS  板子 b'PLY 7F\n' -> 掩码0x7F
+  PASS  板子 b'PLY 0f\n' -> 掩码0x0F
+  PASS  板子 b'PLYALL\n' -> 掩码0x7F
+  PASS  板子 b'PLY 0\n' -> ERR
+  PASS  板子 b'PLY 00\n' -> ERR
+  PASS  板子 b'PLY GG\n' -> ERR
+  PASS  板子 b'PLY 7G\n' -> ERR
+  PASS  板子 b'PLY 123\n' -> ERR
+  PASS  ply_token 前3张 -> 'PLY 07'
+  PASS  ply_token 全7张 -> 'PLY 7F'
+  PASS  ply_token 掩码10 -> '10'(十进制)
+  PASS  ply_token 掩码35 -> '35'(十进制)
+  PASS  ply_token 歧义区 100 明确报错
+  PASS  ply_token 歧义区 105 明确报错
+  PASS  ply_token 歧义区 112 明确报错
+  PASS  ply_token 歧义区 121 明确报错
+  PASS  cells 中英混排=逐字计数
+  PASS  9 格合法
+  PASS  22 格正好合法
+  PASS  23 格被拒
+  PASS  emoji(不在GB2312)被拒
+  PASS  纯英文标点合法
+  PASS  全空格被拒
+  PASS  SerialLink submit NEXT -> OK
+  PASS  空行夹缝里 CLR 照常
+  PASS  V2 抢跑不打断命令回执
+  PASS  乱序 V2 被记录为状态原文
+  PASS  野生的 OK 不会把下条命令带错
+  PASS  查询走 V2 回执
+  PASS  ERR 回执 ok=False
+  PASS  parse_v2 info
+  PASS  parse_v2 stat(十六进制)
+  PASS  parse_v2 垃圾返回 None
+[B] HTTP 端到端（console.py --mock）
+  PASS  GET /api hello ok+mock
+  PASS  hello 报告 ffmpeg 探测结果
+  PASS  GET / 返回 200 HTML
+  PASS  <title> 正确
+  PASS  页面无外部资源引用
+  PASS  reset_board（仅mock）
+  PASS  快捷/广播/PLY 全成功
+  PASS  BOGUS -> ERR 且 ok=False
+  PASS  白名单外的 cmd 被 UI 侧拦截
+  PASS  stat_raw 返回 V2 原文
+  PASS  poll 连接+状态
+  PASS  命令计数 15（ERR不计数/查询不计数）
+  PASS  状态位 11111010
+  PASS  poll 捎带回执日志
+  PASS  FakeSerial 收到的字节序列与参数完全一致
+  PASS  板子落库：PLY 7F 掩码
+  PASS  板子落库：VOL=8 COL=1 文本
+  PASS  INFO?/STAT? 未计入计数
+[C] 资源墙缩略图
+  PASS  setdir 指到临时目录
+  PASS  资源墙发现 3 张
+  PASS  板卡可播判据(640x480 24bit)
+  PASS  板上编号 0,1,2
+  PASS  缩略图 BMP0000.BMP 160px 可打开
+  PASS  缩略图 BMP0001.BMP 160px 可打开
+  PASS  缩略图 BMP0002.BMP 160px 可打开
+  PASS  /thumb 目录穿越被拒(400)
+[D] 导入工坊
+  PASS  图片转成 BMP 成功
+  PASS  产物 640x480 板卡可播
+  PASS  无 ffmpeg 时视频明确降级提示
+  PASS  导入后资源墙自动切到新目录且见 1 张
+  PASS  无卡时拷卡按钮逻辑给出提示而非崩溃
+------------------------------------------------------------
+共 79 项：PASS 79, FAIL 0   用时 1.4s
+ALL PASS
+

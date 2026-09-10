@@ -1,0 +1,33 @@
+# TD 编译产物（体积大、可重建）
+td_project/
+td_project_clean*/
+*.db
+*.bit
+*.bid
+*.qor
+*.area
+*.rpt
+DrCongo.info.iter0/
+
+# 日志 / 崩溃转储 / 临时
+*.log
+*.logw
+minidump/
+*.tmp
+__pycache__/
+*.pyc
+
+# 出货的 BMP / 图片素材（大二进制，按需单独管理）
+tools/console/bmp_out/
+tools/multires_demo/*.BMP
+*.BMP
+*.bmp
+
+# 中间候选项
+tools/opt_surgery/cand_run/
+tools/opt_surgery/ctrl_run/
+tools/opt_surgery/_*.log
+
+# 系统
+Thumbs.db
+desktop.ini
