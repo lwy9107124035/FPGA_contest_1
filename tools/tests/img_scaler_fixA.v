@@ -30,9 +30,12 @@ module img_scaler (
     input  wire        in_eov,
     output reg         out_en,
     output reg  [31:0] out_data,
-    output reg         frame_done
+    output reg         frame_done,
+    // ---- fix-A: write-side backpressure (true ready/valid handshake) ----
+    output wire        in_ready
 );
     localparam [15:0] DST_W = 16'd640, DST_H = 16'd480;
+    localparam [3:0]  RING_DEPTH = 4'd4;        // slot field is 2bit -> 4 rows
 
     // ---------- 端口组合守卫（只被调度块消费——P1/U2 实证安全形状） ----------
     wire       c_ex0  = (src_w == 16'd640) && (src_h == 16'd480);
@@ -111,6 +114,15 @@ module img_scaler (
     wire [15:0] sxc  = (sx  >= (w0 - 16'd1)) ? (w0 - 16'd1) : sx;
     wire [15:0] syc  = (sy  >= (h0 - 16'd1)) ? (h0 - 16'd1) : sy;
     wire        row_ok = (rows_done > syc);
+    // ---- fix-A ----
+    // Original code only blocked  read-ahead-of-write  (rows_done > syc).
+    // It never bounded how far write may run ahead of read, so the 4-row ring
+    // gets overwritten before the consumer reads it  ->  pixel corruption.
+    // NOTE: row_ok must NOT be reused here (it gates the reader and is 0 at
+    // start, reusing it deadlocks the writer). Use addition to avoid the
+    // wrap-around of unsigned subtraction.
+    wire [16:0] lead_lim = {1'b0, syc} + (RING_DEPTH - 4'd1);
+    wire        room_ok  = ({1'b0, rows_done} <= lead_lim);
     wire        iny    = (dy >= offy) && (dy <  (offy + dst_h));
     wire        inx    = (dx >= offx) && (dx <  (offx + dst_w));
     wire        a_blk  = !(iny && inx);
@@ -192,8 +204,8 @@ module img_scaler (
 
             end
 
-            // ---- S1：源行顺序写 ----
-            if (actq && !pass && in_en) begin
+            // ---- S1: source row write (fix-A: gated by room_ok) ----
+            if (actq && !pass && in_en && room_ok) begin
                 ring[wr_addr] <= in_data[31:8];
                 if (wr_i == (w0 - 16'd1)) begin
                     wr_i    <= 16'd0;
@@ -231,5 +243,11 @@ module img_scaler (
             end
         end
     end
+    // Passthrough path does not touch the ring and needs no actq -> never throttled.
+    // The scaling path must also qualify on actq: the write gate inside is
+    // `actq && !pass && in_en && room_ok`, so asserting ready without actq
+    // would make the upstream believe the pixel was taken when it was not.
+    assign in_ready = pass ? 1'b1 : (actq && room_ok);
+
 endmodule
 `default_nettype wire
