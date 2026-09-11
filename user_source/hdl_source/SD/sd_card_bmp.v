@@ -69,6 +69,8 @@ module sd_card_bmp #(
     input                       multi_res,
     output      [15:0]          real_w, real_h,
     output                      pix_sov, pix_eov,
+    // v12 (B3-lite): 缩放器源侧限流请求（透传 bmp_read.pause）
+    input                       pause,
     output                      SD_nCS,
     output                      SD_DCLK,
     output                      SD_MOSI,
@@ -1189,6 +1191,8 @@ bmp_read bmp_read_m0(
     .sd_sec_read_end        (sd_sec_read_end),
     .bmp_data_wr_en         (bmp_data_wr_en),
     .bmp_data               (bmp_data),
+    // v12 (B3-lite)
+    .pause                  (pause),
     // v10.3 扩展3
     .multi_res              (multi_res),
     .real_w                 (real_w),

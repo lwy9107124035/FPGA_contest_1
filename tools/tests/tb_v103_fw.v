@@ -292,12 +292,14 @@ module tb_v103_fw;
         // 第一装载 (纯Verilog有界等待, 无fork)
         do_one_load;
         i = 0;
-        while (finish_cnt == 0 && i < 4_000_000) begin
+        // v12.1: 缩放路出货改 1字/32拍 后, 整帧输出需 ~307200*32=9.83M 拍,
+        //   原 4M 窗口会在真因之外先超时(误报 0x18)。放宽到 12M。
+        while (finish_cnt == 0 && i < 12_000_000) begin
             @(posedge wclk);
             i = i + 1;
         end
         if (finish_cnt == 0)
-            $display("[TB][TIMEOUT] 源完+4M拍仍无 finish —— 0x18 复现");
+            $display("[TB][TIMEOUT] 源完+12M拍仍无 finish —— 0x18 复现");
         repeat (2000) @(posedge mclk);
         report_verdict(1);
 
@@ -307,7 +309,7 @@ module tb_v103_fw;
             src_data = 32'h1000_0000;
             do_one_load;
             i = 0;
-            while (finish_cnt < 2 && i < 4_000_000) begin
+            while (finish_cnt < 2 && i < 12_000_000) begin
                 @(posedge wclk);
                 i = i + 1;
             end

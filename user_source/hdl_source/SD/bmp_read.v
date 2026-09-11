@@ -32,6 +32,11 @@ module bmp_read(
     input                       sd_sec_read_data_valid,
     input                       sd_sec_read_end,
 
+    // v12 (B3-lite): 源侧限流。1 = 下游缩放器环形缓存将满, 本拍不要发起下一个扇区读。
+    //   只在扇区间隙生效: 控制器在 S_WAIT_READ_WRITE 等 sd_sec_read, 拉低即等待,
+    //   不打断已发出的 CMD17(在飞扇区照常收完), 无超时/协议风险。
+    input                       pause,
+
     output reg                  bmp_data_wr_en,
     output reg [23:0]           bmp_data,
 
@@ -352,7 +357,6 @@ always @(posedge clk or posedge rst) begin
 
             ST_LOAD_DATA: begin
                 state_code  <= 4'd4;
-                sd_sec_read <= 1'b1;
 
                 if (sd_sec_read_end) begin
                     sd_sec_read <= 1'b0;
@@ -361,6 +365,11 @@ always @(posedge clk or posedge rst) begin
                     end else begin
                         sd_sec_read_addr <= sd_sec_read_addr + 32'd1;
                     end
+                end else if (!pause) begin
+                    // v12: pause=1 时不再发起新扇区（保持 0，等下游腾出环槽）。
+                    //   已发出的 CMD17 不受影响：控制器在 S_CMD17/S_READ 期间不看
+                    //   sd_sec_read，照样把该扇区收完再回 S_WAIT_READ_WRITE。
+                    sd_sec_read <= 1'b1;
                 end
             end
 

@@ -211,6 +211,7 @@ sd_card_bmp #(
     .real_h            (sd_real_h),
     .pix_sov           (sd_pix_sov),
     .pix_eov           (sd_pix_eov),
+    .pause             (sc_pause),          // v12 (B3-lite)
     .SD_nCS            (sd_ncs),
     .SD_DCLK           (sd_dclk),
     .SD_MOSI           (sd_mosi),
@@ -424,6 +425,7 @@ wire       sd_pix_sov, sd_pix_eov;
 wire [15:0] sd_real_w, sd_real_h;
 wire       sc_out_en;
 wire [31:0] sc_out_data;
+wire       sc_pause;                   // v12 (B3-lite): scaler 源侧限流 -> sd_card_bmp.pause
 wire [23:0] vout_osd;                 // banner
 wire [3:0]  fx_vu0, fx_vu1, fx_vu2, fx_vu3, fx_vu4, fx_vu5, fx_vu6, fx_vu7;
 wire       msg_tx_pad;               // uart tx wire driven by msg_ink's tx
@@ -698,7 +700,8 @@ img_scaler u_img_scaler (
     .in_eov     (sd_pix_eov),
     .out_en     (sc_out_en),
     .out_data   (sc_out_data),
-    .frame_done (sc_fd)
+    .frame_done (sc_fd),
+    .src_pause  (sc_pause)
 );
 
 frame_read_write #(

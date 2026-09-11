@@ -17,13 +17,21 @@ OUT = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_OUT
 
 
 def golden_geom(src_w, src_h):
-    """复算 img_scaler.v 的几何（L162-191 语义）"""
-    e_l = src_w * 512 - src_w * 32          # {sw1,9'd0} - {4'd0,sw1,5'd0} = w*512-w*32
-    e_r = src_h * 512 + src_h * 128         # {sh1,9'd0} + {2'd0,sh1,7'd0} = h*512+h*128
+    """复算 img_scaler.v 的几何（L162-191 语义）
+
+    ★ 2026-09-12 修正：原式 t_nd 取错了分子/分母。
+      DUT 实际是:  dn <= est_w ? (h*640) : (w*480);  dden <= est_w ? w : h;
+      即 est_w(宽图) 时 t_nd = (h*640)//w，否则 t_nd = (w*480)//h。
+      旧代码写成 (e_l//src_w) / (e_r//src_h)，恰好在 4:3（w*480 == h*640）时
+      两式相等，故 800x600 能过；1280x720、400x800 等一律误判。
+    """
+    e_l = src_w * 512 - src_w * 32          # w*480
+    e_r = src_h * 512 + src_h * 128         # h*640
     est_w = e_l >= e_r                      # 寄存器域 est_w
     est_c = est_w                           # 端口组合版同式
     wide = est_c
-    t_nd = (e_l // src_w) if est_w else (e_r // src_h)
+    # --- 修正点：est_w 用 e_r/src_w(=h*640/w)，否则用 e_l/src_h(=w*480/h) ---
+    t_nd = (e_r // src_w) if est_w else (e_l // src_h)
     t_nd = max(1, t_nd)
     sx_step = (src_w * 8192) // (640 if wide else t_nd)
     sy_step = (src_h * 8192) // (t_nd if wide else 480)

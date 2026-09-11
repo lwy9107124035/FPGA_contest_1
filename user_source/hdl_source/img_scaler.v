@@ -1,5 +1,8 @@
     //=============================================================================
-    // img_scaler v10.3b-13 "DISPATCH-ONLY"（TD 生存形状定案）
+    // img_scaler v12.0 (v10.3b-13 DISPATCH-ONLY + B3-lite 源侧限流)
+    //   v12: 新增 src_pause 输出 —— 环深 4 槽挡不住"写侧抢跑"(突发期写侧一次推 5 行,
+    //   领先量单调累积到 26 行), 于是改为"让上游别抢跑": 写侧领先 >=2 行即请
+    //   bmp_read 暂停下一个扇区。安全不变式 rows_done <= syc+3 见下方 pause_c。
     // ★★ 06:04 探针账本终极对账：唯一反复通过的结构 = P1/H2/U2 形状
     //    【端口只被 if 体与调度块消费，always 里零"无条件端口直读寄存器"】。
     //    一切"打拍链 sw_r<=src_w"式写法 = TD 6.2.168 coredump 之源
@@ -30,7 +33,9 @@ module img_scaler (
     input  wire        in_eov,
     output reg         out_en,
     output reg  [31:0] out_data,
-    output reg         frame_done
+    output reg         frame_done,
+    // v12 (B3-lite): 源侧限流请求。1 = 请上游暂停供数。详见下方 pause_c 推导。
+    output reg         src_pause
 );
     localparam [15:0] DST_W = 16'd640, DST_H = 16'd480;
 
@@ -98,7 +103,14 @@ module img_scaler (
     reg [15:0] dy, dx;
     reg        a_black, a_go, fd_pend;
     reg [23:0] ram_q;
-    reg [1:0]  half_cnt;  // b-22 限流真四分频: S2 出货上限 1字/4clk=25字/us (教训: 门控占空比必须实测, 详见交接文档三更)
+    // v12.1 去突发化输出节奏：原 b-22 "真四分频"= 1字/4拍 —— 一整行 640 字会在
+    //   2560 拍内灌向 512 深的 wfifo，写侧要么溢出丢字（0x18 卡死），要么为排空而
+    //   长时间占住 SDRAM 写口、把显示读口饿死（= 板上花屏）。
+    //   源侧实际只需 ~1字/280拍（SD 每像素 ~180 拍 × 800 入/512 出），故取
+    //   1字/32拍：比需求快 ~8 倍（不拖慢装载），却把瞬时灌入速率降到原来的 1/8，
+    //   wfifo 水位长期贴地，写侧不再成串占口。直通 pass 路仍完全旁路，节奏不变。
+    reg [4:0]  rd_tick;
+    wire       rd_gate = (rd_tick == 5'd31);
 
     wire [15:0] cx  = (dx >= offx) ? (dx - offx) : 16'd0;
     wire [15:0] cy  = (dy >= offy) ? (dy - offy) : 16'd0;
@@ -111,6 +123,15 @@ module img_scaler (
     wire [15:0] sxc  = (sx  >= (w0 - 16'd1)) ? (w0 - 16'd1) : sx;
     wire [15:0] syc  = (sy  >= (h0 - 16'd1)) ? (h0 - 16'd1) : sy;
     wire        row_ok = (rows_done > syc);
+    // ---- v12 (B3-lite) 源侧限流 ----
+    // 环 = 4 槽，行 r 写入 slot=r%4；读侧读 slot=syc%4，其内容是"最后一个写入该槽的行"。
+    // 只要"行 syc+4 永不被写"，slot syc%4 就必然仍是行 syc 本身（行 syc 之后同槽再无写入）。
+    // 故安全不变式 = rows_done <= syc+3（rows_done==syc+4 即正在写行 syc+4）。
+    // 上游 bmp_read 在"扇区间隙"响应 pause；一个在飞扇区最多 512B=170px=0.21 行。
+    // 取门限 syc+2：在飞扇区落地后 rows_done <= syc+2+0.21 < syc+3，不变式恒成立。
+    // pass=1（恰 640x480 直通）时不走环形缓存，无需限流。
+    wire [16:0] syc_g2  = {1'b0, syc} + 17'd2;
+    wire        pause_c = !pass && ({1'b0, rows_done} >= syc_g2);
     wire        iny    = (dy >= offy) && (dy <  (offy + dst_h));
     wire        inx    = (dx >= offx) && (dx <  (offx + dst_w));
     wire        a_blk  = !(iny && inx);
@@ -128,10 +149,11 @@ module img_scaler (
             ld0<=1'b0; ld1<=1'b0; ld2<=1'b0;
             rows_done<=16'd0; wr_slot<=2'd0; wr_i<=16'd0;
             dy<=16'd0; dx<=16'd0; a_black<=1'b0; a_go<=1'b0; fd_pend<=1'b0;
-            ram_q<=24'd0; half_cnt<=2'b00;
-            out_en<=1'b0; out_data<=32'd0; frame_done<=1'b0;
+            ram_q<=24'd0; rd_tick<=5'd0;
+            out_en<=1'b0; out_data<=32'd0; frame_done<=1'b0; src_pause<=1'b0;
         end else begin
             out_en <= 1'b0; frame_done <= 1'b0;
+            src_pause <= pause_c;          // v12: 源侧限流请求（寄存器输出，避免毛刺到 SD 侧）
             actq <= st;
             sq   <= st ? ((sq < 7'd81) ? (sq + 7'd1) : sq) : 7'd0;
             ld0  <= actq && (sq == 7'd1);   // v16b: no port read outside dispatch (TD law)
@@ -152,7 +174,7 @@ module img_scaler (
                 rows_done <= 16'd0; wr_slot <= 2'd0; wr_i <= 16'd0;
                 dy<=16'd0; dx<=16'd0; a_go<=1'b0; fd_pend<=1'b0; eovr<=1'b0;
                 t_nd <= 16'd0; sq   <= 7'd0;
-                half_cnt <= 2'b00; // b-22: 每帧起点对齐分频相位
+                rd_tick <= 5'd0; // b-22/v12.1: 每帧起点对齐出货节奏相位
                 st   <= 1'b1;
             end
             if (in_eov && actq) eovr <= 1'b1;
@@ -217,7 +239,7 @@ module img_scaler (
                     if (fd_pend) begin fd_pend<=1'b0; frame_done<=1'b1; st<=1'b0; end
                 end
                 if (actq && (dy < DST_H)) begin
-                    if ((row_ok || eovr) && (pass || (half_cnt[1] && half_cnt[0]))) begin   // b-22q: 缩放路真四分频窗(4拍开1拍), 实测 25字/us (tb_v103_fw scaler 完帧 12.3ms/307200)
+                    if ((row_ok || eovr) && (pass || rd_gate)) begin   // v12.1: 缩放路 1字/32拍(去突发化, 见 rd_gate 注释)
                         ram_q   <= ring[rd_addr];
                         a_black <= a_blk;
                         a_go    <= 1'b1;
@@ -227,7 +249,7 @@ module img_scaler (
                         end else dx <= dx + 16'd1;
                     end
                 end
-                half_cnt <= half_cnt + 2'b01;   // b-22 自由计数（直通路由 pass 旁路分频门，节奏零变化）
+                rd_tick <= rd_tick + 5'd1;   // v12.1 自由计数（直通 pass 旁路节奏门，零变化）
             end
         end
     end
