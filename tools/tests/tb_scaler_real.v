@@ -73,6 +73,12 @@ module tb_scaler_real;
     localparam integer OFFX = (640 - DSTW) >> 1;
     localparam integer OFFY = (480 - DSTH) >> 1;
 
+    // 期望: 只能在"图片矩形"内期望图像内容; 矩形外(letterbox 四边)一律应为黑。
+    //   ★ 2026-09-12 修正: 旧版只判 dy<OFFY(上边), 漏判下边/左右边, 导致
+    //     凡是带黑边的分辨率(off!=0)全被误判 FAIL(失败像素数恰好=黑边像素数)。
+    wire in_rect = (odx >= OFFX) && (odx < OFFX+DSTW) &&
+                   (ody >= OFFY) && (ody < OFFY+DSTH);
+
     function integer exp_sx; input integer dx;
         begin
             if (dx < OFFX) exp_sx = -1;
@@ -165,9 +171,15 @@ module tb_scaler_real;
                 // 解码: R=[31:24]=x[7:0]  G=[23:16]=y[7:0]  B=[15:8]={x[11:8],y[11:8]}
                 a_x = out_data[31:24] | (out_data[15:12] << 8);
                 a_y = out_data[23:16] | (out_data[11:8]  << 8);
-                if (e_x < 0 || e_y < 0) begin
+                if (!in_rect) begin
+                    // letterbox 四边: 必须是纯黑 (R=G=B=0)
                     if (out_data[31:8] != 24'd0) begin
                         bad = bad + 1; row_bad = row_bad + 1;
+                        if (n_bad_print < 12) begin
+                            n_bad_print = n_bad_print + 1;
+                            $display("MISMATCH #%0d (border) dst(%0d,%0d) got=%0d,%0d raw=%08x",
+                                     n_bad_print, odx, ody, a_x, a_y, out_data);
+                        end
                         if (bad == 1) begin first_bad_dx = odx; first_bad_dy = ody; end
                     end
                 end else if ((a_x != e_x) || (a_y != e_y)) begin
