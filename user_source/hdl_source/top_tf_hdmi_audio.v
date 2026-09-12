@@ -68,6 +68,9 @@ wire        display_valid;
 
 wire [3:0]  state_code;
 wire [6:0]  seg_data_0;
+// v12.3: 提前到此处声明（数码管计数显示要用；原声明在 L419 属 declare-after-use，
+//   会生成 1bit 隐式网，与本 6bit 声明冲突 —— 本文件历史上已被这条坑过多次）
+wire [5:0]  list_cnt, list_depth;
 
 // v10 d_card_bmp -> msg_ink
 // HDL-7225
@@ -234,17 +237,30 @@ seg_decoder seg_decoder_m0(
     .seg_data          (seg_data_0)
 );
 
+// v12.3 观测口：数码管低两位显示「已登记图片张数」(十六进制, 00..3F)。
+//   本板 CH340 串口不可用 -> 播控台发不出 LIST? -> 用数码管把注册数读出来，
+//   用于判定「只显示两张」到底是卡里只有两张、还是扫描没登记全。
+wire [6:0] cnt_lo_seg, cnt_hi_seg;
+seg_decoder seg_decoder_cnt_lo(
+    .bin_data          (list_cnt[3:0]),
+    .seg_data          (cnt_lo_seg)
+);
+seg_decoder seg_decoder_cnt_hi(
+    .bin_data          ({2'b00, list_cnt[5:4]}),
+    .seg_data          (cnt_hi_seg)
+);
+
 seg_scan seg_scan_m0(
     .clk               (clk),
     .rst_n             (rst_n),
     .seg_sel           (seg_sel),
     .seg_data          (seg_data),
-    .seg_data_0        ({1'b1,7'b1111_111}),
-    .seg_data_1        ({1'b1,7'b1111_111}),
+    .seg_data_0        ({1'b1,cnt_lo_seg}),   // v12.3: 登记数 低4位
+    .seg_data_1        ({1'b1,cnt_hi_seg}),   // v12.3: 登记数 高2位
     .seg_data_2        ({1'b1,7'b1111_111}),
     .seg_data_3        ({1'b1,7'b1111_111}),
     .seg_data_4        ({1'b1,7'b1111_111}),
-    .seg_data_5        ({1'b1,seg_data_0})
+    .seg_data_5        ({1'b1,seg_data_0})    // 原 state_code
 );
 
 // ===================== =====================
@@ -403,7 +419,6 @@ wire [7:0] tx_byte;
 wire [3:0] vol_lvl;
 wire       next_pulse, auto_pulse;
 wire       prev_pulse;   // v10.2: PREV next
-wire [5:0] list_cnt, list_depth;   // v10.2: LIST
 wire [4:0] list_cur;
 wire       ls_tgl;
 wire [7:0] sd_dbg;                   // v5c: {scan_done,load_busy,auto_en,disp_valid,img_idx,load_idx}
