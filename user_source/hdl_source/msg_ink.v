@@ -536,7 +536,13 @@ module msg_ink (
         col_exec <= 1'b0;                              // v10.1
             br_lvl <= 4'd5; gn_lvl <= 4'd5;            // v10.3: 5=标准档（直通零回归）
             fd_mode <= 2'd0;                           // v10.3: 默认硬切（=v10.2 行为）
-            clk_on <= 1'b0; vu_on <= 1'b0; sr_spd <= 3'd0; scale_en <= 1'b0;  // v10.3: 特效全默认关+缩放默认关
+            clk_on <= 1'b0; vu_on <= 1'b0; sr_spd <= 3'd0;
+            // v12.2: 缩放默认【开】。原为 1'b0（"零回归"考虑），但 multi_res=0 时
+            //   bmp_read 只认"恰 640x480"，多分辨率图会被整组拒收 —— 演示卡上
+            //   8 张里只有 640x480 那张能播（用户实测"只显示两张图片"）。
+            //   而播控台串口一旦不可用（缺 CH340），用户就无法下发 "SC 1" 自救。
+            //   缩放链路已在 v12.1 修正并在真速率下全分辨率验证通过，故改为默认开。
+            scale_en <= 1'b1;
             next_pulse <= 1'b0; auto_pulse <= 1'b0; prev_pulse <= 1'b0;
             ls_tgl <= 1'b0; len_snap <= 7'd0;
             prm_tgl <= 1'b0; prm_code <= 4'd0;            // v7 §2 channel state
