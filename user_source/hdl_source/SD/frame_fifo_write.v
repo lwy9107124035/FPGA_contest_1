@@ -83,12 +83,13 @@ wire into_burst;
 //   FIFO 水位长期 ≤ 源单阵发长(170), App_rd_busy 抢占窗内净积累 ≪ 512,
 //   满溢出丢字(0x18 根因, tb_v103_fw 四场景账本定罪)在数学上不可能。
 //   尾部补齐条款(write_len_latch <= rdusedw+write_cnt)原样保留。
-assign into_burst = (((write_len_latch <= (rdusedw + write_cnt))||rdusedw > 0) && ~App_rd_busy);//当rd在突发时不会进入burst
+// v12.9: restore official Anlogic write path (same card shows images on official demo).
+//   v12.1 b-22 into_burst(rdusedw>0)+b-23 mid-burst ~App_rd_busy yield can starve
+//   write forever when HDMI read bursts often -> write_finish never -> black+banner.
+assign into_burst = (((write_len_latch <= (rdusedw + write_cnt))||rdusedw > BURST_SIZE) && ~App_rd_busy);
 
 assign App_wr_addr = {App_wr_addr_r[ADDR_BITS - 1:0]};
-//assign O_wr_busy = (state != S_IDLE || (S_IDLE && write_req_d2));
-// b-23: busy only when draining (park w/ empty fifo must not block reads) fix board garble
-assign O_wr_busy = (state == S_WRITE_BURST && rdusedw > 0) || (state == S_CHECK_FIFO && into_burst);
+assign O_wr_busy = (state == S_WRITE_BURST || (state == S_CHECK_FIFO && into_burst));
 assign wr_burst_finish = (burst_cnt >= BURST_SIZE);
 assign write_finish = (state == S_END) ? 1'b1 : 1'b0;            //write finish at state 'S_END'
 assign App_wr_en = App_wr_en_d0;
@@ -168,14 +169,8 @@ begin
 		else
 			App_wr_addr_r <= App_wr_addr_r;
 		//
-		// b-22 方案W第二刀(修正版): burst 内按真排出计数 —— 门控必须预扣在飞的一拍!
-		//   App_wr_en_d0 是寄存输出, 它对应的 FIFO pop 发生在"下一拍边沿"; 若只判
-		//   rdusedw!=0, 当 FIFO 恰剩 1 字时会连打两拍(第二拍落空=幻读, tb_v103_fw
-		//   诊断 phantom_gate=33171 实锤)。rdusedw > App_wr_en: 预扣在飞拍后仍有
-		//   存量才放行; rdusedw==0 时 0>x 恒假自动封死。rdusedw 来自跨域同步写
-		//   指针, 只会低估不会高估, 无幻读窗口。
-		// b-23: yield to hdmi read mid-burst (mutual exclusion, level still <= ~220)
-		if(App_wr_en_r && ~App_rd_busy && (rdusedw > App_wr_en) && burst_cnt + App_wr_en < BURST_SIZE && (burst_cnt + write_cnt + App_wr_en < write_len_latch))begin
+		// v12.9: official App_wr_en (no mid-burst yield to read)
+		if(App_wr_en_r && burst_cnt + App_wr_en < BURST_SIZE && (burst_cnt + write_cnt + App_wr_en < write_len_latch))begin
             App_wr_en_d0 <= 1'b1;
         end
 		else
@@ -264,8 +259,8 @@ begin
 			
 			S_WRITE_BURST:
 			begin
-				// b-23: parked-burst escape on new frame req (abort), reuse END->ACK path
-				if(wr_burst_finish == 1'b1 || (write_req_d2 == 1'b1 && App_wr_en_d0 == 1'b0))
+				// v12.9: official — finish burst only on burst_cnt, no mid-abort
+				if(wr_burst_finish == 1'b1)
 				begin
 					App_wr_en_r <= 1'b0;
 					state <= S_WRITE_BURST_END;
