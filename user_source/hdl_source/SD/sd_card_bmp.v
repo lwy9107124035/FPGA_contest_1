@@ -628,10 +628,16 @@ always @(posedge clk or posedge rst) begin
                     play_mask <= count_to_bits(img_found_count);
                     ply_locked <= 1'b1;              // v10.3b-18
                 end
-                4'd5: begin                          // SCAN4（单趟，零回归：链式不武装；清锁在主 FSM）
+                4'd5: begin                          // SCAN4（单趟；清锁 + 强制重扫）
                     scan_target_r    <= 3'd4;
                     scan_wanted      <= 6'd4;
                     ply_locked       <= 1'b0;        // v10.3b-18: 重扫=换片，池交还给自动放行
+                    prm_rekick       <= 1'b1;        // v12.4: 与 SCAN7 同型重扫。原 SCAN4 不
+                                                     //   rekick：PLYALL(count=0) 把 play_mask
+                                                     //   清零后，已扫完的场景没有新的 scan_done
+                                                     //   上升沿，首图永不加载（板测 L 04 却黑屏）。
+                    if (play_mask == 32'd0)
+                        play_mask    <= 32'h0F;      // 兜底：零掩码=永远 avail_set=0
                 end
                 4'd6: begin                          // SCAN7 + 触发自愈重扫（重扫后 img_sector* 按新深度重建）
                     scan_target_r    <= 3'd7;
@@ -675,8 +681,11 @@ always @(posedge clk or posedge rst) begin
         //   只在 scan_done 上升沿动手；用户手工 PLY/PLYALL/RNG 置 ply_locked 后不再踩脚，
         //   直到下一次 SCAN* 清锁（=换片，池重新交给自动放行）。VID 池自管（cur_mask32 走 vid_n）。
         scan_done_d2 <= scan_done;
+        // v12.4: scan_done 上升沿与末张 scan_found_valid 同拍；img_found_count
+        //   要下一拍才 +1，用旧值会把 play_mask 算少 1（4 张→只放行 3 张）。
         if (scan_done && !scan_done_d2 && !vid_en && !ply_locked)
-            play_mask <= count_to_bits(img_found_count);
+            play_mask <= count_to_bits(scan_found_valid ? (img_found_count + 6'd1)
+                                                        : img_found_count);
     end
 end
 
@@ -965,7 +974,7 @@ always @(posedge clk or posedge rst) begin
                 display_valid         <= 1'b1;
                 first_image_committed <= 1'b1;
             end else if (load_busy) begin
-                if (load_timeout_cnt > 32'd80_000_000) begin                    // v10 黑匣子：timeout 触发拍锁存签名（非阻塞读旧 source/wr_done_seen=卡死时的值）
+                if (load_timeout_cnt > 32'd250_000_000) begin                   // v12.4: 2.5s（原0.8s；缩放路源完后仍~1s出货）
                     stall_hist2   <= stall_hist1;
                     stall_hist1   <= stall_sig_now;
                     stall_sig_now <= cur_sig;
@@ -993,9 +1002,11 @@ always @(posedge clk or posedge rst) begin
                     //   LOAD_DATA(state=4) 期的字节**+帧写完脉冲清零；装载从未启动/数据段
                     //   真断流 0.8s 照旧超时（保护语义不丢）。retry 侧由 v7.3a-b20 看门狗
                     //   负责"发不出去"，二者不再互相踩踏。
+                    // v12.4: 超时 0.8s→2.5s。源读完后缩放路仍以 1字/32拍 出货 ~1s，
+                    //   0.8s 会把健康装载杀成 0x18→重扫（板测 src_done=1/frame_done=0 循环）。
                     if ((sd_sec_read_data_valid && state_code_i == 4'd4) || write_finish_pulse)
                         load_timeout_cnt <= 32'd0;
-                    else
+                    else if (load_timeout_cnt < 32'd250_000_000)
                         load_timeout_cnt <= load_timeout_cnt + 32'd1;
                     end
             // v7.3a watchdog: retry armed but bmp_ready never returns within 0.3s
