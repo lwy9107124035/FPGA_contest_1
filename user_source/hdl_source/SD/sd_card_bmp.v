@@ -1108,7 +1108,7 @@ always @(posedge clk or posedge rst) begin
                 //   pending buffer 全部保持原值不动），display_valid 不碰：
                 //   画面停留在上一张完好帧上，零黑屏。
                 if (retry_req && scan_done && bmp_ready && !load_busy && !load_abort
-                    && !scan_cont_active && !chain_arming && (load_gap_cnt == 24'd0)) begin
+                    && !scan_cont_active && !chain_arming) begin
                     retry_req        <= 1'b0;
                     load_sector      <= sector_lut(load_idx);
                     load_start_pulse <= 1'b1;
@@ -1121,7 +1121,7 @@ always @(posedge clk or posedge rst) begin
                 // v5f-fix2: 各发起分支统一加 !load_abort 防护——abort 拍 load_busy 已清、
                 //   scan_done 要到下一拍才被 bmp_read 拉低，此窗口内发起的 load_start
                 //   会被 abort 分支吞掉（v7.3 起：该场景多走上方 retry 分支，同理防护）
-                else if (scan_done && !scan_cont_active && !chain_arming && !first_image_committed && bmp_ready && !load_busy && !load_abort && (avail_set != 32'd0) && (load_gap_cnt == 24'd0)) begin
+                else if (scan_done && !scan_cont_active && !chain_arming && !first_image_committed && bmp_ready && !load_busy && !load_abort && (avail_set != 32'd0)) begin
                     load_idx         <= first_from_avail;
                     load_sector      <= sector_lut(first_from_avail);
                     // v7.4: 上电(valid=0)照旧 buf0；恢复性重扫(valid=1)写"非显示中"
@@ -1136,7 +1136,7 @@ always @(posedge clk or posedge rst) begin
                     auto_cnt         <= 32'd0;
                 end
                 // 手动下一张优先：写到“非当前显示”的另一块 buffer
-                else if (scan_done && !scan_cont_active && !chain_arming && bmp_ready && display_valid && !load_busy && !load_abort && next_req_pending && (avail_set != 32'd0) && (load_gap_cnt == 24'd0)) begin
+                else if (scan_done && !scan_cont_active && !chain_arming && bmp_ready && display_valid && !load_busy && !load_abort && next_req_pending && (avail_set != 32'd0)) begin
                     load_idx         <= next_from_current;
                     load_sector      <= sector_lut(next_from_current);
                     pending_buf_idx  <= next_buf_lut(disp_buf_idx, display_valid);
@@ -1149,7 +1149,7 @@ always @(posedge clk or posedge rst) begin
                     auto_cnt         <= 32'd0;
                 end
                 // v10.2: 手动上一张（PREV）：与 NEXT 同构反向，优先级紧随 NEXT 之后
-                else if (scan_done && !scan_cont_active && !chain_arming && bmp_ready && display_valid && !load_busy && !load_abort && prev_req_pending && (avail_set != 32'd0) && (load_gap_cnt == 24'd0)) begin
+                else if (scan_done && !scan_cont_active && !chain_arming && bmp_ready && display_valid && !load_busy && !load_abort && prev_req_pending && (avail_set != 32'd0)) begin
                     load_idx         <= prev_from_current;
                     load_sector      <= sector_lut(prev_from_current);
                     pending_buf_idx  <= next_buf_lut(disp_buf_idx, display_valid);
