@@ -77,7 +77,7 @@ assign rd_vld = (state == S_READ_BURST && burst_cnt >= BURST_SIZE);
 // O_rd_busy: 读突发中，或显示 FIFO 水位偏低（写侧必须让路，否则换图装载抢占
 //   SDRAM 读口 → 显示欠载 → 竖条花线/噪点。deadlock 不会：水位低时
 //   App_wr_busy 为写侧占用，读侧仍可在 ~App_wr_busy 时突发补水。
-assign O_rd_busy = (state == S_READ_BURST) || (wrusedw < 10'd256);
+assign O_rd_busy = (state == S_READ_BURST);//读指令期间（v12.7 水位抢占曾写饿死帧写，已回退）
 //burst_cnt代表发送的读指令
 //但rd_burst_finish需要在发送完十个时钟后拉高，此时数据全部读出
 assign rd_burst_finish = (rd_vld && rd_delay == 4'd10);
