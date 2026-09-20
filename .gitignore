@@ -23,3 +23,12 @@ minidump/
 
 # sim trace dumps
 tools/tests/*.txt
+
+# compiled simulation binaries (regenerate with iverilog)
+*.vvp
+*.vcd
+# underscore-prefixed scratch logs
+**/_*log.txt
+**/_out.txt
+**/_selftest_*
+**/_probe_*
