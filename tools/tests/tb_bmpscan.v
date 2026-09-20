@@ -34,30 +34,56 @@ module tb_bmpscan;
   reg [15:0] fh      [0:15];   // 每张图真实高
   integer    ncard = 5;
   reg        mr      = 1'b0;   // 驱动 DUT multi_res（= SC 开关）
+  reg        liar     = 1'b0;  // T6: 让 4 号槽的 bfSize 少于其声明像素所需字节数
 
-  function [7:0] card_byte;            // 扇区 sec 内第 off 字节
-    input [31:0] sec; input [9:0] off;
-    integer k; reg ish; integer mk;
+  // Per-sector classification cache. card_byte() used to loop the whole header table and
+  // run a 20-way case for all 512 bytes of every sector; a full-card walk is tens of
+  // thousands of sectors, so that lookup dominated the runtime. Classify once when the
+  // controller's read address changes, and short-circuit everything past the 54-byte
+  // header (the DUT never inspects those bytes during a scan).
+  integer hdr_idx = -1;                    // -1 = blank sector, else index into hdr_sec
+  reg [31:0] sec_fl = 32'd0;               // bfSize stored for the current sector
+
+  function integer find_hdr;               // caller must keep hdr_idx in step with m_addr
+    input [31:0] sec;
+    integer k;
     begin
-      ish = 1'b0; mk = 0;
-      for (k = 0; k < ncard; k = k + 1)
-        if (sec == hdr_sec[k]) begin ish = 1'b1; mk = k; end
-      if (!ish) card_byte = 8'h00;      // 空白区全 0
+      find_hdr = -1;
+      for (k = 0; k < ncard; k = k + 1) if (sec == hdr_sec[k]) find_hdr = k;
+    end
+  endfunction
+
+  function [31:0] file_len_of;
+    input integer mk;
+    begin
+      // v13.0: bfSize must agree with the declared geometry, otherwise the DUT's new
+      //   acceptance gate is right and this model is wrong (a real BMP writer never emits
+      //   a 1280x720 header carrying a 640x480 byte count).
+      file_len_of = 32'd54 + fw[mk] * fh[mk] * 32'd3;
+      if (liar && (mk == 4)) file_len_of = 32'd54 + ((fw[mk] * fh[mk] * 32'd3) >> 2);
+    end
+  endfunction
+
+  function [7:0] card_byte;                // sector must be the one hdr_idx was keyed to
+    input [31:0] sec; input [9:0] off;
+    begin
+      if (hdr_idx < 0)        card_byte = 8'h00;        // 空白区全 0
+      else if (off >= 10'd54) card_byte = 8'hA5;        // 像素区：数值无关紧要
       else begin
         case (off)
           10'd0: card_byte = "B";
           10'd1: card_byte = "M";
-          10'd2: card_byte = 8'h36;     // file_len = 921654 (0x000E1036)
-          10'd3: card_byte = 8'h10;
-          10'd4: card_byte = 8'h0E;
-          10'd5: card_byte = 8'h00;
+          10'd2: card_byte = sec_fl[7:0];     // file_len 小端
+          10'd3: card_byte = sec_fl[15:8];
+          10'd4: card_byte = sec_fl[23:16];
+          10'd5: card_byte = sec_fl[31:24];
           10'd10: card_byte = 8'h36;    // pixel_offset = 54
           10'd11,10'd12,10'd13: card_byte = 8'h00;
-          10'd18: card_byte = fw[mk][7:0];    // width  小端低字节
-          10'd19: card_byte = fw[mk][15:8];   // width  高字节
+          10'd18: card_byte = fw[hdr_idx][7:0];    // width  小端低字节
+          10'd19: card_byte = fw[hdr_idx][15:8];   // width  高字节
           10'd20,10'd21: card_byte = 8'h00;
-          10'd22: card_byte = fh[mk][7:0];    // height 小端低字节
-          10'd23: card_byte = fh[mk][15:8];   // height 高字节
+          10'd22: card_byte = fh[hdr_idx][7:0];    // height 小端低字节
+          10'd23: card_byte = fh[hdr_idx][15:8];   // height 高字节
           10'd24,10'd25: card_byte = 8'h00;
           10'd26,10'd27: card_byte = 8'h00; // planes 低位（不影响匹配）
           10'd28: card_byte = 8'h18;    // 24bpp
@@ -82,7 +108,9 @@ module tb_bmpscan;
     sd_sec_read_data_valid <= 1'b0;
     sd_sec_read_end        <= 1'b0;
     if (sd_sec_read_addr !== m_addr) begin
-      m_addr <= sd_sec_read_addr;          // 新扇区：一切重来
+      m_addr   <= sd_sec_read_addr;          // 新扇区：一切重来
+      hdr_idx   = find_hdr(sd_sec_read_addr);  // 每扇区一次，不在每字节上重复查表
+      sec_fl   <= (hdr_idx < 0) ? 32'd0 : file_len_of(hdr_idx);
       m_cnt  <= 0;
       m_busy <= 1'b0;
       m_fin  <= 0;
@@ -145,7 +173,7 @@ module tb_bmpscan;
 
   integer errors = 0;
   integer t0;
-  task automatic ck(input cond, input [8*64-1:0] name);
+  task automatic ck(input cond, input [8*96-1:0] name);
     begin
       if (!cond) begin errors = errors + 1; $display("FAIL: %0s", name); end
       else $display("PASS: %0s", name);
@@ -161,30 +189,36 @@ module tb_bmpscan;
     repeat (5)  @(negedge clk); sd_init_done = 1;
     repeat (5)  @(negedge clk);
 
+    // Scan-window caps below are a simulation-time lever only, not a behaviour change:
+    //   every assertion's target file sits well inside its window, and T4 alone keeps the
+    //   full 8191-empty-sector stop-loss walk. Without the caps each test crawled to
+    //   scan_max_sector=131071 and the bench no longer finished inside a coffee break.
     // T1：5 张连续卡（复刻现场），从 3504（数据区起点）扫，target=7
     ncard = 5;
     $display("[T1] 5-file card, start=3504, target=7");
+    scan_max_sector = 32'd13100;             // 末图头 11184 + 余量
     do_scan(3504, 3'd7);
-    ck(scan_done,           "T1 scan_done 置起");
-    ck(ngot == 5,           "T1 找到全部 5 张（现场板子=4，若这里是5说明RTL无罪）");
-    ck(got[4] == 11184,     "T1 第5张落在 sector 11184");
+    ck(scan_done,           "T1 scan_done asserted");
+    ck(ngot == 5,           "T1 all 5 files found (board showed 4; 5 here means RTL is not at fault)");
+    ck(got[4] == 11184,     "T1 fifth file lands on sector 11184");
 
     // T2：5 张卡但从 sector 0 起扫（复刻真实开机走位，前面 3760 空扇区）
     $display("[T2] 5-file card, start=0, target=7");
     do_scan(0, 3'd7);
-    ck(ngot == 5,           "T2 从0起步也能找齐 5 张");
+    ck(ngot == 5,           "T2 scan from sector 0 still finds all 5");
 
     // T3：6 张卡 target=7（间距同真实卡）
     $display("[T3] 6-file card, start=3504, target=7");
     ncard = 6;
     do_scan(3504, 3'd7);
-    ck(ngot == 6,           "T3 6 张全找");
+    ck(ngot == 6,           "T3 all 6 files found");
 
     // T4：5 张卡但第5张与第4张间隔 9000 空扇区（>8191 止损）——验证止损行为
     $display("[T4] 5-file card with 9000-gap before #5, start=3504, target=7");
     ncard = 5; hdr_sec[4] = 20184;   // 9328+1801+9055 ≈ 新位置
+    scan_max_sector = 32'd25000;     // 越过 8191 止损点(~19320)与第5张(20184)即可，不必爬到 131071
     do_scan(3504, 3'd7);
-    ck(ngot == 4,           "T4 大间隙后第5张被止损（这是设计行为）");
+    ck(ngot == 4,           "T4 5th file beyond the 9000-sector gap is refused by the stop-loss (by design)");
 
     // ============ T5（v10.3 板测预检核心）：修卡脚本的 13 图卡里，
     //   BMP0000~0004 = 5 张标准 640×480，BMP0005~0012 = 8 张多分辨率演示图。
@@ -192,19 +226,36 @@ module tb_bmpscan;
     //   mr=0（SC 0 上电默认）演示图在"登记阶段"就被拒 → 只登 5；
     //   mr=1（先 SC 1）演示图按 mr_ok 放宽 → 7 张全登。
     //   ⇒ 板测第 0 步必须先 `SC 1` 再 `SCAN32`，否则 8 张演示图根本进不了候选表。
+    //   v13.0: 演示图扇区位置按各自真实 bfSize 顺延排布（1280×720 占 5401 扇区，
+    //   1024×768 占 4609），旧硬排 1856 间距在诚实的 file_len 下会互相重叠。
     $display("[T5] reformat-card mix: 5x640x480 + 1280x720 + 1024x768");
     hdr_sec[4] = 11184;   // 复位 T4 对被复用槽的改写（9000-gap 实验残留）
     ncard = 7; fw[5]=16'd1280; fh[5]=16'd720; fw[6]=16'd1024; fh[6]=16'd768;
+    hdr_sec[5] = 13040;                       // 11184 之后（640×480 只需 1801）
+    hdr_sec[6] = hdr_sec[5] + 32'd5401 + 32'd55;   // 让过 1280×720 的全部像素扇区
     mr = 1'b0; scan_max_sector = 32'd13100;   // 只需越过被拒演示图(13040)即证"没登记"，避免长尾空扫（省仿真时间）
     do_scan(3504, 3'd7);
-    ck(ngot == 5, "T5a SC=0 扫描登记：演示图被登记门拒（只 5 张）→ 板测必须先 SC 1 的铁证");
-    mr = 1'b1; scan_max_sector = 32'd16800;   // T5b 要装得下 7 张全登记（末图 14896 + 1801）
+    ck(ngot == 5, "T5a SC=0: demo images rejected at registration (only 5) - board test must send SC 1 first");
+    mr = 1'b1; scan_max_sector = 32'd18600;   // 7 张全登：末图头 18496，登到即停
     do_scan(3504, 3'd7);
-    ck(ngot == 7, "T5b SC=1 扫描登记：7 张全登（含 1280×720 与 1024×768）");
-    ck(got[5] == 13040 && got[6] == 14896, "T5b 演示图扇区位置正确");
-    mr = 1'b0; scan_max_sector = 32'd131071;
+    ck(ngot == 7, "T5b SC=1: all 7 registered (incl 1280x720 and 1024x768)");
+    ck(got[5] == 13040 && got[6] == hdr_sec[6], "T5b demo image sector positions correct");
+    mr = 1'b0;
 
-    $display("=== tb_bmpscan 完成: errors=%0d ===", errors);
+    // T6（v13.0 新增）：一张 bfSize 撒谎的 640×480（声明的字节数少于像素需求）。
+    //   旧逻辑照样登记 → 装载时凑不满 rows_done → 缩放器停摆 → 0x18 黑屏。
+    //   新逻辑必须在登记阶段就拒掉，且不影响同卡其它图。
+    $display("[T6] card with one lying bfSize among 5 good files");
+    ncard = 5; fw[5]=16'd640; fh[5]=16'd480;
+    hdr_sec[4] = 11184;
+    liar     = 1'b1;                        // 只给 4 张的字节数，声明仍是 640×480
+    scan_max_sector = 32'd13100;
+    do_scan(3504, 3'd7);
+    ck(ngot == 4, "T6 file whose bfSize cannot back its geometry is refused (4 left)");
+    ck(got[3] == 9328, "T6 the 4 files before the refused one keep their positions");
+    liar     = 1'b0;
+
+    $display("=== tb_bmpscan done: errors=%0d ===", errors);
     $finish;
   end
 endmodule
