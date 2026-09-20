@@ -40,7 +40,7 @@ for ($i = $startAt; $i -lt $steps.Count; $i++) {
   $s = $steps[$i]
   $log = "{0}_out.log" -f $s.id
   Write-Host ("[{0}] {1}" -f $s.id, $s.tcl) -NoNewline
-  & $td $s.tcl *> $log
+  & $td $s.tcl 2>&1 | Out-File -FilePath $log -Encoding ascii
   $text = Get-Content $log -Raw
 
   if ($text -notmatch [regex]::Escape($s.marker)) {

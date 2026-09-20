@@ -53,19 +53,29 @@ render path while the real problem was upstream of it.
 
 ## Step 1 - flash
 
-    double-click: C:\Users\lwy\OneDrive\Desktop\FPGA嵌入式大赛\1-板子复活一键烧录.bat
+Preferred, from a terminal (it prints the bit's build time, then self-tests COM4 and stops
+without changing what the screen shows):
 
-It burns `C:\td_batch\lab_pro\td_project\lab_pro.bit` (the script prints that file's build
-time - check it says 2026-09-20, otherwise the wrong bit is in place). Takes ~50 s, the
-screen goes black during it, that is normal.
+    powershell -ExecutionPolicy Bypass -File C:\td_batch\lab_pro\tools\auto_demo.ps1 -SkipEmg
+
+The double-click shortcut
+`C:\Users\lwy\OneDrive\Desktop\FPGA嵌入式大赛\1-板子复活一键烧录.bat` does the same thing
+but then sends `EMG1`, which puts the board into the Chinese emergency-banner mode and hides
+the image playback being tested. If that is what was run, send `CLR` afterwards to return to
+normal, otherwise step 0's screen reading is meaningless.
+
+Both burn `C:\td_batch\lab_pro\td_project\lab_pro.bit`. Check the printed build time says
+2026-09-20; if it does not, the v13.0 bit is not in place. Takes ~50 s, the screen goes
+black during it, that is normal.
 
 Two known traps (V):
 - SRAM configuration, so every power cycle needs a re-flash.
 - The script opens COM4 directly. If the console app is running, COM4 is held and step 3
   of the script reports `NO ACK` even though the flash itself succeeded.
 
-Rollback bit: `td_project\lab_pro_v12.9_pre_v13_*.bit` (the pre-fix build). Copy it over
+Rollback bit: `td_project\lab_pro_v12.9_pre_v13.bit` (the pre-fix build). Copy it over
 `lab_pro.bit` to return to last week's behaviour.
+
 
 ## Step 2 - card
 
