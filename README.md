@@ -56,13 +56,40 @@ Rules:
 
 ## Verification gates
 
-Run from `tools/tests/`:
+One command, from `tools/tests/`:
 
-- `tb_scaler_real.v` - primary gate: real-rate source, independently decodable pattern,
-  geometry checked against design intent.
-- `tb_chain.v`, `tb_mask32.v` - long-standing pass/fail gates.
+    powershell -ExecutionPolicy Bypass -File .\run_gates.ps1
+
+It compiles and runs the four SD/BMP gates and checks each one's expected pass
+signature; exit code 1 means at least one gate regressed. Add `-WithOldRtl` to
+replay the A/B demo of the v13.0 bug against the frozen `bmp_read_pre_v13.v`.
+
+| Bench | Proves | Pass signature |
+|---|---|---|
+| `tb_bmpgate.v` | a header cannot register unless its own bytes back its declared geometry | `RESULT: PASS` (14 checks) |
+| `tb_bmpscan.v` | sector walk, scan-window stop-loss, multi-resolution registration gate | `tb_bmpscan done: errors=0` (11 checks, ~2 min) |
+| `tb_chain.v` | SD load chain, NEXT/commit behaviour | `30 checks, 0 FAIL` |
+| `tb_mask32.v` | mask and commit path | `11090 checks, 0 FAIL` |
+
+Those four need only the SD subtree; `run_gates.ps1` carries the file list, because
+compiling the whole `hdl_source` tree drags in vendor `*_sim.v` models that Icarus
+cannot resolve.
+
+Bench-specific gates, run by hand:
+
+- `tb_scaler_real.v` - primary render gate: real-rate source, independently decodable
+  pattern, geometry checked against design intent.
 - `tb_v103_fw.v` - integration bench (real wfifo + frame_fifo_write + scaler).
 - `scaler_golden_cmp.py` - offline golden geometry comparison.
 
 `tb_scaler_burst.v` is a boundary stress bench only; its 1 pixel/clock source is not
 real hardware behaviour and its numbers must be rescaled before being read as evidence.
+
+## Current state (2026-09-20)
+
+`develop` is tagged `v13.0-bmpgate`: the black-screen defect is root-caused at the BMP
+acceptance gate, fixed, and simulation-proven, but not yet confirmed on hardware, so it
+has not reached `main`. `docs/history/` holds the September forensics, including the two
+conclusions that were later disproven and must not be acted on again. The target spec for
+the dual-FPGA three-screen build is `docs/plan/20260920_dual_fpga_three_screen/`.
+
