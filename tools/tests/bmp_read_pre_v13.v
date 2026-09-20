@@ -92,40 +92,16 @@ wire mr_ok = (width[15:0]  >= 16'd320 ) && (width[15:0]  <= 16'd1280) &&
              (width[15:0]  <= (height[15:0] << 2)) &&
              (height[15:0] <= (width[15:0]  << 2)) &&
              (width[1:0] == 2'b00);
-// v13.0 gate 1: a header is only playable if the file really holds the pixels it declares.
-//   Without this a truncated file or a lying bfSize registers as playable; the pixel
-//   stream then cannot reach rows_done==h0, the scaler never flushes its last row
-//   (img_scaler.v:164 documents that park), write_finish never fires, and the board
-//   shows black screen + OSD banner with a repeated 0x18 signature.
-//   Size math is safe because mr_ok already bounds w<=1280, h<=1080 and w%4==0, so the
-//   row stride is exactly 3*w (no BMP row padding) and w*h*3 <= 4_147_200 bytes.
-//   pixel_offset is sanity-bounded first so a garbage header cannot wrap the sum.
-//   The upper bound catches a bfSize that lies high: without it the load FSM drains to
-//   file_len and can only be rescued by the 2.5 s load timeout plus two retries.
-//   1 MiB of slack is far beyond any legitimate trailer for this geometry range.
-wire [31:0] declared_pixels = width[15:0] * height[15:0];
-wire [31:0] pixel_bytes_req = declared_pixels * 32'd3;
-wire [31:0] bytes_needed    = pixel_offset + pixel_bytes_req;
-wire        offset_ok       = (pixel_offset >= 32'd54) && (pixel_offset < 32'h0100_0000);
-wire        size_ok         = offset_ok &&
-                              (file_len >= bytes_needed) &&
-                              (file_len <= (bytes_needed + 32'h0010_0000));
 assign header_match = (header_0 == "B") &&
                       (header_1 == "M") &&
                       (bit_count    == 16'd24) &&
                       (compression  == 32'd0) &&
-                      size_ok &&
                       (multi_res ? mr_ok
                                : ((width[15:0]  == bmp_width) &&
                                   (height[15:0] == bmp_height)));
-// v13.0 gate 2: the pixel stream is exactly the declared geometry wide. For a
-//   well-formed 24-bit BMP pixel_offset + 3*w*h == file_len, so the extra term is
-//   redundant and behaviour is bit-identical; it only bites when the file carries
-//   trailing bytes, which used to be emitted as extra pixels after end-of-frame.
 assign bmp_data_valid = (sd_sec_read_data_valid == 1'b1) &&
                         (bmp_len_cnt >= pixel_offset) &&
-                        (bmp_len_cnt <  file_len) &&
-                        (bmp_len_cnt < (bytes_needed));
+                        (bmp_len_cnt <  file_len);
 assign file_sector_count = (file_len == 32'd0) ? 32'd1 : ((file_len + 32'd511) >> 9);
 assign next_scan_sector_if_match = scan_sector + file_sector_count;
 assign next_scan_sector_if_miss  = scan_sector + 32'd1;
@@ -248,35 +224,19 @@ end
 //     rd_cnt 冻结在 SCAN/LOAD_HDR 分支 ⇒ 像素流全程稳定，可直接喂缩放器锁存。
 //   pix_sov：ack 收下进 LOAD_DATA 的那一拍脉冲；首像素要等扇区取数(≥数十拍)，
 //     天然满足缩放器"sov 领先首个 in_en ≥1 拍"的契约。
-//   pix_eov：v13.0 改为按「声明像素数」收尾，与最后一个 bmp_data_wr_en 精确同拍。
-//     旧条件要求文件最后一个字节恰落在像素第 3 字节，即
-//     (file_len-1-pixel_offset) mod 3 == 2；只要尾部有 1 字节多余或像素数不满，
-//     eov 就永不到来 → 缩放器 eovr 不置 → 整帧永久停摆（黑屏只剩横幅）。
-//     新条件与被 gate 1 校验过的 declared_pixels 对齐：合法文件下两者同拍，零行为变化。
+//   pix_eov：文件最后一个字节恰为像素第 3 字节(idx==2) 时寄存一拍，
+//     与最后一个 bmp_data_wr_en 精确同拍（防御性再与 wr_en 相与）。
 assign real_w = width[15:0];
 assign real_h = height[15:0];
-reg  [31:0] pix_cnt;
 reg pix_sov_q, pix_eov_q;
-always @(posedge clk or posedge rst) begin
-    if (rst)
-        pix_cnt <= 32'd0;
-    else if (state != ST_LOAD_DATA)
-        pix_cnt <= 32'd0;
-    else if (bmp_data_wr_en)
-        pix_cnt <= pix_cnt + 32'd1;
-end
 always @(posedge clk or posedge rst) begin
     if (rst) begin
         pix_sov_q <= 1'b0;
         pix_eov_q <= 1'b0;
     end else begin
         pix_sov_q <= (state == ST_LOAD_WAIT) && write_req_ack;
-        // pix_cnt counts pixels already handed out; the pixel being assembled at this
-        // byte is number pix_cnt+1, so the declared-last pixel is pix_cnt == target-1.
         pix_eov_q <= (state == ST_LOAD_DATA) && bmp_data_valid &&
-                     (bmp_byte_idx == 2'd2) &&
-                     (declared_pixels != 32'd0) &&
-                     (pix_cnt == (declared_pixels - 32'd1));
+                     (bmp_len_cnt == (file_len - 32'd1)) && (bmp_byte_idx == 2'd2);
     end
 end
 assign pix_sov = pix_sov_q;
