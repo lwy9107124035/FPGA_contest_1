@@ -20,3 +20,6 @@ minidump/
 *.qor
 *.bid
 *.log
+
+# sim trace dumps
+tools/tests/*.txt

@@ -1,0 +1,98 @@
+{
+  "status": "Analytical model and design allocations; not measured utilization",
+  "per_board": {
+    "lut": 19600,
+    "ff": 19600,
+    "multipliers_18x18": 29,
+    "eram9k": 64,
+    "eram32k": 16,
+    "eram_bytes": 139264,
+    "sdram_bytes": 8388608,
+    "pll": 4
+  },
+  "A": {
+    "lut_allocations": {
+      "baseline_rounded": 4000,
+      "fat32_bmp": 1500,
+      "memory_scheduler": 1500,
+      "pixel_processing_osd": 1800,
+      "second_video_tx": 2500,
+      "link": 1500,
+      "scene_control": 700
+    },
+    "lut_total_allocated": 13500,
+    "dsp_allocated": 12,
+    "eram9k_allocations": {
+      "historical_baseline": 20,
+      "link_fifos": 4,
+      "packet_buffers": 2,
+      "fonts_and_osd": 6,
+      "pcm_and_waveform": 4,
+      "metadata": 2
+    },
+    "eram9k_total": 38,
+    "eram32k_allocations": {
+      "two_2048x32_video_fifos": 4,
+      "one_2048x32_result_fifo": 2
+    },
+    "eram32k_total": 6,
+    "sdram_main_bytes": 3686400,
+    "sdram_main_fraction": 0.439453125,
+    "pll_allocated": 3
+  },
+  "B": {
+    "lut_allocations": {
+      "infrastructure": 3000,
+      "scaler": 1800,
+      "fft_audio": 2500,
+      "link": 1500,
+      "ui": 1500,
+      "task_control": 1000
+    },
+    "lut_total_allocated": 11300,
+    "dsp_allocated": 14,
+    "eram9k_allocations": {
+      "infrastructure_allowance_not_measured": 20,
+      "link_fifos": 4,
+      "packet_buffers": 2,
+      "fonts_and_osd": 6,
+      "fft_and_window_coefficients": 3,
+      "pcm_buffers": 4,
+      "metadata": 2,
+      "preview_line_cache": 2
+    },
+    "eram9k_total": 43,
+    "eram32k_allocations": {
+      "two_2048x32_source_rows": 4,
+      "two_512x36_fft_banks": 6,
+      "one_2048x32_result_fifo": 2
+    },
+    "eram32k_total": 12,
+    "sdram_main_bytes": 2534400,
+    "sdram_main_fraction": 0.3021240234375,
+    "pll_allocated": 2,
+    "pll_with_interface_contingency": 3
+  },
+  "compute": {
+    "fft_butterflies": 2304,
+    "fft_cycle_budget": 163840,
+    "fft_compute_ms_at_50MHz": 3.2767999999999997,
+    "fft_window_ms": 10.666666666666666,
+    "fft_fraction_of_window": 0.3072,
+    "scaler_cycles_at_24_cycles_per_output_pixel": 7372800,
+    "scaler_compute_ms_at_50MHz": 147.45600000000002
+  },
+  "bandwidth": {
+    "A_two_frame_reads_MBps_at_60Hz": 147.456,
+    "A_result_writes_MBps_at_wire_peak": 13.333333333333334,
+    "A_aggregate_MBps": 160.78933333333333,
+    "A_aggregate_with_30pct_margin_MBps": 209.02613333333335,
+    "A_effective_sdram_gate_MBps": 220,
+    "wire_payload_ratio_512_plus32": 0.9411764705882353,
+    "PCM_MBps": 0.096,
+    "FFT_result_MBps_with_64B_packet_at100Hz": 0.0064,
+    "min_read_fifo_time_us_at512pixels_and25p175MHz": 20.337636544190666,
+    "tf_min_640x480_seconds_at25MHz": 0.294912,
+    "tf_min_1280x960_seconds_at25MHz": 1.179648
+  }
+}
