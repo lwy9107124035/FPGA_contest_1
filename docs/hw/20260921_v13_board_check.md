@@ -17,9 +17,25 @@ Simulation evidence (V): `tools/tests/run_gates.ps1` -> 4 passed, 0 failed.
 The same bench against the frozen pre-v13 snapshot (`-WithOldRtl`) fails C2/C3/C4/C5,
 including "pix_eov still fires exactly once <== the park bug".
 Resource cost (V, from TD synthesis): LUT 17330 -> 17626 of 19600 (88.4% -> 89.9%),
-DSP 9 -> 10 of 29.
+DSP 9 -> 12 of 29. See the packing-limit note above before reading that as spare room.
 
 Hardware evidence: none yet. That is what tomorrow is for.
+
+## The design is at its packing limit  (V, read this before adding any logic)
+
+TD numbers for this build: LUT 17626/19600 (89.93%), slices 9608 = 98.04%,
+DSP 12/29, BRAM 47/64. The device is effectively full.
+
+This is not theoretical. Re-expressing the gate's `declared_pixels * 3` as shift-and-add
+saves two DSP blocks (12 -> 10) and TD synthesises it happily, but placement then aborts:
+
+    PHY-9009 ERROR: Design's mslice number = 4917, exceeds the limit 4900.
+
+So the saved DSPs come back as LUTs and the design no longer fits. That form was measured,
+reverted, and the reason is recorded at `bmp_read.v:108`. Any new logic on board A has to
+arrive with a matching removal - which is exactly the argument for putting the scaler and
+the FFT on board B (see `docs/plan/20260920_dual_fpga_three_screen/01_current_plan/
+02_resource_budget_v3.1.md`).
 
 ## Step 0 - the two readings that decide everything else  (rule 5)
 
