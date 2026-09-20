@@ -1,0 +1,107 @@
+# Board check for v13.0 - 2026-09-21 morning
+
+Scope: this page exists so the hardware session needs no thinking. Everything below is
+either already verified (marked V) or still unknown (marked ?). Do not skip step 0.
+
+## What changed, in one paragraph  (V)
+
+`bmp_read.v` gained a header acceptance gate (v13.0). A BMP is now registered and loaded
+only if its own `bfSize` actually covers `pixel_offset + 3*w*h`, the pixel stream is cut
+off at the declared pixel count, and end-of-frame is derived from the declared count
+instead of from "the last byte of the file happens to be the third byte of a pixel".
+Before this, one file whose header over- or under-stated its size could be registered,
+started loading, fail to reach its row count, and park the scaler permanently - which
+looks like a black screen with only the OSD banner and a repeating `0x18`.
+
+Simulation evidence (V): `tools/tests/run_gates.ps1` -> 4 passed, 0 failed.
+The same bench against the frozen pre-v13 snapshot (`-WithOldRtl`) fails C2/C3/C4/C5,
+including "pix_eov still fires exactly once <== the park bug".
+Resource cost (V, from TD synthesis): LUT 17330 -> 17626 of 19600 (88.4% -> 89.9%),
+DSP 9 -> 10 of 29.
+
+Hardware evidence: none yet. That is what tomorrow is for.
+
+## Step 0 - the two readings that decide everything else  (rule 5)
+
+Take a photo of the HDMI screen and read the two low digits of the 7-seg display
+(hexadecimal registered-image count) before touching any command.
+
+| 7-seg | Screen | Reading |
+|---|---|---|
+| `00` | black, banner only | card has no playable file - go to "Card", RTL is not implicated |
+| `>00` | black, banner only | files registered but none delivered - this is the defect v13.0 targets |
+| `>00` | image visible | fixed; compare the count against the number of files on the card |
+
+The distinction matters because the September investigation spent a whole round on the
+render path while the real problem was upstream of it.
+
+## Step 1 - flash
+
+    double-click: C:\Users\lwy\OneDrive\Desktop\FPGA嵌入式大赛\1-板子复活一键烧录.bat
+
+It burns `C:\td_batch\lab_pro\td_project\lab_pro.bit` (the script prints that file's build
+time - check it says 2026-09-20, otherwise the wrong bit is in place). Takes ~50 s, the
+screen goes black during it, that is normal.
+
+Two known traps (V):
+- SRAM configuration, so every power cycle needs a re-flash.
+- The script opens COM4 directly. If the console app is running, COM4 is held and step 3
+  of the script reports `NO ACK` even though the flash itself succeeded.
+
+Rollback bit: `td_project\lab_pro_v12.9_pre_v13_*.bit` (the pre-fix build). Copy it over
+`lab_pro.bit` to return to last week's behaviour.
+
+## Step 2 - card
+
+Use the eight demo images that ship with the project, at card root, nothing else:
+
+    C:\td_batch\lab_pro\tools\multires_demo\BMP0000..0007.BMP
+
+They pass the official `bmp_check.py` 8/8 (V). Expected registered count after power-up
+is `08`. If the count comes up short, run the official 640x480 set from
+`HX4S20_Contest_202606\7_lab_ex_2026_nosoft\已解压_官方参考例程\lab_ex4_tf\doc\TF卡图片`
+as a control - if the official images play and ours do not, the defect is in our card
+content, not in the RTL.
+
+## Step 3 - serial readings, in this order
+
+COM4 is reachable through the console API at `http://127.0.0.1:8765/api`; commands end in
+`\n` (not `\r\n`) and the board answers in GB2312 (V).
+
+    LIST?      -> "L <cur> <idx> <count>"   registered count, walk it every 5 s for 2 min
+    WHY?       -> "W <a> <b> <c> <code>"    state_code triple + reason byte
+    STAT?      -> "V2 <msgcnt> <dbg>"       dbg byte: bit7 scan_done bit5 src_done bit4 wr_done
+
+Record `WHY?` at 60 s and at 5 min. The `0x18` code means bmp_read is idle with
+`source_done=1, write_done=0`, i.e. the frame never received its 307200 words.
+
+## What each outcome means
+
+| Observation after flash | Conclusion | Next move |
+|---|---|---|
+| count `08`, image on screen, `WHY?` no longer `18` | v13.0 closed the defect | merge `develop` to `main`, tag the hardware anchor |
+| count `08`, still `0x18` | shortfall is not header-driven | add the delivered-word telemetry on `WHY?` bits 1:0 before touching anything else |
+| count lower than the file count | scan/registration still rejecting files | `LIST?` + compare against `bmp_check.py` on the same card |
+| count `00` | card or SD path | step 2 control test with the official images |
+
+## Known open items, deliberately not touched this round  (?)
+
+None of these are proven defects; they are places where the design can lose a frame
+silently, and each needs its own evidence before it gets a fix.
+
+1. `top_tf_hdmi_audio.v:705,718` - `sc_fd` (scaler frame_done) is wired and never
+   consumed. `sd_card_bmp.v:351` leaves the low 2 bits of the `WHY?` state byte unused.
+   Routing a delivered-word counter or `sc_fd` into those two bits ends the guessing in
+   the table above. Not done yet because it spans three modules with no simulation
+   coverage.
+2. `frame_read_write.v:101,153` - both `full_flag` outputs are unconnected, so a FIFO
+   overflow on either side is invisible.
+3. `top_tf_hdmi_audio.v:185` - `SCAN_MAX_SECTOR` is 131071 while the data area starts at
+   sector 65536; a cold scan can walk a long empty tail.
+4. `top_tf_hdmi_audio.v` reports ~30 `HDL-7225 CRITICAL-WARNING: ... is already
+   implicitly declared` from TD. Implicit nets are exactly how a port ends up silently
+   unconnected; worth one dedicated cleanup pass with the build log as the checklist.
+
+Rule 2 still applies: name the failing layer and show the evidence before patching it.
+Six versions (b17..b23) were spent on SDRAM arbitration for a defect that lived in the
+header gate.
