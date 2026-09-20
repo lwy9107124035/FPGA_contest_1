@@ -70,8 +70,13 @@ replay the A/B demo of the v13.0 bug against the frozen `bmp_read_pre_v13.v`.
 | `tb_bmpscan.v` | sector walk, scan-window stop-loss, multi-resolution registration gate | `tb_bmpscan done: errors=0` (11 checks, ~2 min) |
 | `tb_chain.v` | SD load chain, NEXT/commit behaviour | `30 checks, 0 FAIL` |
 | `tb_mask32.v` | mask and commit path | `11090 checks, 0 FAIL` |
+| `tb_dc3_link.v` | inter-board byte pipe, clock-domain crossing, READY credit | `RESULT: PASS` (13 checks) |
 
-Those four need only the SD subtree; `run_gates.ps1` carries the file list, because
+`tb_dc3_link.v` needs only `user_source/hdl_source/link/dc3_link.v` - the link is not in
+any build yet, and it is the one part of the dual-board plan that can be proven without a
+second board on the bench.
+
+The four SD gates need only the SD subtree; `run_gates.ps1` carries the file list, because
 compiling the whole `hdl_source` tree drags in vendor `*_sim.v` models that Icarus
 cannot resolve.
 

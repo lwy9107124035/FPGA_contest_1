@@ -8,6 +8,7 @@
 #   tb_bmpscan   sector walk + register  "errors=0"            11 checks, ~2 min
 #   tb_chain     SD load chain           "30 checks, 0 FAIL"
 #   tb_mask32    mask/commit path        "11090 checks, 0 FAIL"
+#   tb_dc3_link  DC3 byte pipe, CDC, READY  "RESULT: PASS"  13 checks
 # -WithOldRtl additionally runs tb_bmpgate against the frozen pre-v13 snapshot. That is an
 # expected-FAIL demo of the original bug (C2/C3/C4/C5), never a gate.
 param(
@@ -63,6 +64,12 @@ $results += Invoke-Gate "tb_chain"       (Join-Path $here "tb_chain.v") `
             $sdTree "30 checks, 0 FAIL"
 $results += Invoke-Gate "tb_mask32"      (Join-Path $here "tb_mask32.v") `
             $sdTree "11090 checks, 0 FAIL"
+
+# The DC3 link is standalone for now (nothing in top instantiates it yet), so it needs
+# only its own file - and it is the one part of the dual-board plan provable without a
+# second board on the bench.
+$results += Invoke-Gate "tb_dc3_link"    (Join-Path $here "tb_dc3_link.v") `
+            @(Join-Path $src "link\dc3_link.v") "RESULT: PASS"
 
 if ($WithOldRtl) {
   Write-Host ""
