@@ -37,6 +37,42 @@ arrive with a matching removal - which is exactly the argument for putting the s
 the FFT on board B (see `docs/plan/20260920_dual_fpga_three_screen/01_current_plan/
 02_resource_budget_v3.1.md`).
 
+## The two clock domains have not been meeting timing for a while  (V)
+
+Routed `lab_pro_timing.rpt`, comparing the Sep-18 v12.9 build (`td_project9`) with tonight's
+v13.0 build (`td_project10`). Constrained period vs what the router actually achieved:
+
+| clock | constrained | v12.9 achieved | v13.0 achieved | verdict |
+|---|---|---|---|---|
+| `sd_card_clk` | 10.0 ns (100 MHz) | 29.06 ns (34.4 MHz) | 35.59 ns (28.1 MHz) | violated before, violated now, 22% worse |
+| `video_clk` | 40.0 ns (25 MHz) | 74.61 ns (13.4 MHz) | 78.12 ns (12.8 MHz) | violated before, violated now |
+| `clk` (50 MHz input) | 20.0 ns | met (+14.5 ns slack) | met (+14.3 ns slack) | fine |
+
+Read this carefully before blaming v13.0: `sd_card_clk` needed 29 ns and was run at 10 ns
+**in the build that has been on the board for the last two weeks**. A domain whose worst
+path is 3x its period passes or fails depending on temperature and voltage, and "sometimes
+it shows the image, sometimes it parks at `0x18`" is precisely what that looks like. The
+transient `0x18` that has been treated as an observation item is a candidate for being this.
+
+What v13.0 did is make an already-failing domain 22% worse, because the gate's
+`width*height -> *3 -> +offset -> compare` chain is a long combinational path sitting in
+exactly that domain (`sd_card_bmp` is clocked by `sd_card_clk`, `top_tf_hdmi_audio.v:708`).
+
+Two ways to pay for it, neither attempted tonight because both need their own evidence
+first (rule 2):
+
+1. Register the gate's result. `header_match` currently ripples through a multiplier and a
+   32-bit compare in one cycle; latching `size_ok` when the header finishes capturing breaks
+   the path in half. Needs a scan-FSM review, not a one-line edit.
+2. Free logic so the router stops congesting: `sector_lut` table merging was already
+   estimated at 600-1100 LUT (P2 in the 09-15 handover).
+
+If tomorrow's run is flaky in a way the sim cannot explain, this is the first suspect, and
+the test is cheap: re-flash `td_project\lab_pro_v12.9_pre_v13.bit` and see whether the
+flakiness is identical. Same flakiness with a 29 ns path and with a 35 ns path means timing
+is not the cause of that particular symptom.
+
+
 ## Step 0 - the two readings that decide everything else  (rule 5)
 
 Take a photo of the HDMI screen and read the two low digits of the 7-seg display
@@ -88,6 +124,25 @@ is `08`. If the count comes up short, run the official 640x480 set from
 `HX4S20_Contest_202606\7_lab_ex_2026_nosoft\已解压_官方参考例程\lab_ex4_tf\doc\TF卡图片`
 as a control - if the official images play and ours do not, the defect is in our card
 content, not in the RTL.
+
+The card content was pre-flighted against the v13.0 gate tonight (V), header by header:
+
+| file | geometry | bfSize | 54 + 3*w*h | gate |
+|---|---|---|---|---|
+| BMP0000 | 640x480 | 921654 | 921654 | pass, exact |
+| BMP0001 | 1280x720 | 2764854 | 2764854 | pass, exact |
+| BMP0002 | 800x600 | 1440054 | 1440054 | pass, exact |
+| BMP0003 | 400x800 | 960054 | 960054 | pass, exact |
+| BMP0004 | 1024x768 | 2359350 | 2359350 | pass, exact |
+| BMP0005 | 320x240 | 230454 | 230454 | pass, exact |
+| BMP0006 | 640x200 | 384054 | 384054 | pass, exact |
+| BMP0007 | 1280x360 | 1382454 | 1382454 | pass, exact |
+
+All eight are 24bpp, uncompressed, `pixel_offset = 54`, and byte-exact, so none of them can
+be rejected by the new size gate. That removes "is the test card valid?" from tomorrow's
+question list: if the count is not `08`, the board is telling us something about the RTL or
+the SD path, not about the files.
+
 
 ## Step 3 - serial readings, in this order
 
