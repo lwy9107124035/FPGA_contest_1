@@ -104,7 +104,10 @@ wire mr_ok = (width[15:0]  >= 16'd320 ) && (width[15:0]  <= 16'd1280) &&
 //   file_len and can only be rescued by the 2.5 s load timeout plus two retries.
 //   1 MiB of slack is far beyond any legitimate trailer for this geometry range.
 wire [31:0] declared_pixels = width[15:0] * height[15:0];
-wire [31:0] pixel_bytes_req = declared_pixels * 32'd3;
+// x*3 as shift-and-add: TD maps a 32x2 multiply to its own DSP block, and this device
+//   has 29 of them for the whole design (board B needs several for the bilinear scaler
+//   and the FFT). One 16x16 for w*h is unavoidable; the *3 is not.
+wire [31:0] pixel_bytes_req = declared_pixels + {declared_pixels[30:0], 1'b0};
 wire [31:0] bytes_needed    = pixel_offset + pixel_bytes_req;
 wire        offset_ok       = (pixel_offset >= 32'd54) && (pixel_offset < 32'h0100_0000);
 wire        size_ok         = offset_ok &&
