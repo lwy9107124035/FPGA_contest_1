@@ -1,6 +1,7 @@
 tools/console/_bmp_preview/
 tools/opt_surgery/_b3_evidence/
 tools/tests/_b3/
+tools/__pycache__/
 tools/console/__pycache__/
 tools/console/bmp_out/
 tools/console/card_backup/
