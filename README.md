@@ -33,26 +33,40 @@ merge target, and must not be deleted or pushed.
 
 ## Branch model
 
-    main                      stable, each merge here was verified on hardware
-      ^
-    develop                   integration branch
-      ^
-      |-- feat/single-board-baseline-fix   current black-screen defect
-      |-- feat/board-a-dual-hdmi-audio     board A: TF -> SDRAM -> 2x HDMI + audio
-      |-- feat/board-b-scaler-fft-third-screen  board B: scaler, FFT, third screen UI
-      |-- feat/inter-board-8bit-sync-link  the DC3 8-bit source-synchronous link
-      |-- test/regression-gates            simulation gate scripts, golden models
-      `-- test/hardware-in-loop            on-board probe scripts, acceptance records
+Five branches, and only five. Anything that has merged is deleted, because its commits
+are still on `develop` and a stale branch pointer is just a second place to be wrong.
+
+    main                              stable; every merge here was proven on hardware
+    develop                           integration branch; gates green
+      |-- feat/board-a-dual-hdmi-audio          board A: TF -> SDRAM -> 2x HDMI + audio
+      |-- feat/board-b-scaler-fft-third-screen  board B: scaler, FFT, third-screen UI
+      `-- feat/inter-board-8bit-sync-link       the DC3 8-bit link
+              layer 1 (byte pipe, CDC, READY credit) is merged and proven;
+              layer 2 (packets, CRC32, session) is WIP on this branch and NOT passing
 
 Rules:
 1. `main` only accepts a merge after the change is proven on the real board.
 2. Never patch the same layer twice: state the failing layer and the evidence first.
 3. Every hardware session leaves a tagged rollback anchor.
 4. Simulation testbenches must model the real source rate (~96-180 clk/pixel over SPI).
-   A 1 pixel/clock source is ~100x too fast and manufactures bugs that cannot exist
-   on hardware. This caused an entire abandoned architecture (B3) in September 2026.
+   A 1 pixel/clock source is ~100x too fast and manufactures bugs that cannot exist on
+   hardware. That caused an entire abandoned architecture (B3) in September 2026.
 5. Before touching the render path, confirm the signal source is valid: take a screen
    photo and read the 7-seg registered-image count first.
+6. A failing bench is not a gate. `run_gates.ps1` holds only checks that pass; the WIP
+   link packet layer is deliberately left out rather than wired in red.
+
+Tags are the rollback anchors: `baseline-b23-pre-refactor`, `baseline-v12.9`,
+`v13.0-bmpgate`, and `v13.0-bit-0920` which names the exact tree the board's current bit
+was synthesised from.
+
+## One repository
+
+This is the only git repository in the project. The Chinese-named folder under
+`OneDrive\Desktop\` is a read-only reference library; its notes and one-click scripts are
+tracked here under `docs/reference/`, and it is not a repository of its own. Build trees
+(`td_project*/`), generated images and simulation binaries are ignored - the font image
+in particular is regenerable with `tools/cjk_flash/convert_font_image.py`.
 
 ## Verification gates
 
