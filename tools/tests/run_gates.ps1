@@ -9,6 +9,7 @@
 #   tb_chain     SD load chain           "30 checks, 0 FAIL"
 #   tb_mask32    mask/commit path        "11090 checks, 0 FAIL"
 #   tb_dc3_link  DC3 byte pipe, CDC, READY  "RESULT: PASS"  13 checks
+#   tb_dc3_pack  framing, CRC32, session  "RESULT: PASS"  17 checks (slow: one full frame)
 # -WithOldRtl additionally runs tb_bmpgate against the frozen pre-v13 snapshot. That is an
 # expected-FAIL demo of the original bug (C2/C3/C4/C5), never a gate.
 param(
@@ -70,6 +71,8 @@ $results += Invoke-Gate "tb_mask32"      (Join-Path $here "tb_mask32.v") `
 # second board on the bench.
 $results += Invoke-Gate "tb_dc3_link"    (Join-Path $here "tb_dc3_link.v") `
             @(Join-Path $src "link\dc3_link.v") "RESULT: PASS"
+$results += Invoke-Gate "tb_dc3_pack"    (Join-Path $here "tb_dc3_pack.v") `
+            (@(Join-Path $src "link\dc3_pack.v") + @(Join-Path $src "link\dc3_link.v")) "RESULT: PASS"
 
 if ($WithOldRtl) {
   Write-Host ""
