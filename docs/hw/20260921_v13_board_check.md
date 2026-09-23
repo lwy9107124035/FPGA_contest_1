@@ -119,11 +119,26 @@ Use the eight demo images that ship with the project, at card root, nothing else
 
     C:\td_batch\lab_pro\tools\multires_demo\BMP0000..0007.BMP
 
-They pass the official `bmp_check.py` 8/8 (V). Expected registered count after power-up
-is `08`. If the count comes up short, run the official 640x480 set from
+They pass the official `bmp_check.py` 8/8 (V). **The expected count on power-up is
+`04`, not `08`** - `SCAN_TARGET_COUNT` is 4 and one pass registers at most 7, so the
+boot scan stops after four. Send `SCAN32` to chain passes; then expect `08`.
+Reading `04` and calling it a failure is the trap this line used to set. If the count comes up short, run the official 640x480 set from
 `HX4S20_Contest_202606\7_lab_ex_2026_nosoft\已解压_官方参考例程\lab_ex4_tf\doc\TF卡图片`
 as a control - if the official images play and ours do not, the defect is in our card
 content, not in the RTL.
+
+The card also carries `ZZ_LIAR.BMP`: a 320x240 whose header claims the full 230454 bytes
+but whose last 3072 were removed. It is the differential test, and it is the only thing on
+this page that works with no serial cable at all:
+
+| count | screen | verdict |
+|---|---|---|
+| `08` | images play | v13.0 works: the liar was refused and the eight good files survived it |
+| `09` | black, banner only, `0x18` | the liar was registered and parked the scaler - this is pre-v13.0 behaviour |
+| `08` | black, banner only | the liar is not the cause; go to the delivered-word telemetry next |
+
+Rebuild or re-check a card with `tools/sd_prep/make_test_card.py D: --verify`, which also
+re-derives the lie from the header instead of trusting the file to still be there.
 
 The card content was pre-flighted against the v13.0 gate tonight (V), header by header:
 
