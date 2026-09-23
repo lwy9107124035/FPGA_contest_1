@@ -64,6 +64,18 @@ def main():
         return 1
 
     if not verify_only:
+        # Order matters and it is write order, not alphabetical. FAT hands out clusters in
+        # the sequence files are created, bmp_read registers in sector order, and the
+        # default scan stops after SCAN_TARGET_COUNT=4 hits. A liar written last lands past
+        # that stop and is never scanned - the differential test would silently do nothing.
+        liar = os.path.join(drive, "ZZ_LIAR.BMP")
+        if not os.path.exists(liar):
+            with open(os.path.join(SRC_DIR, LIE_SRC), "rb") as f:
+                data = f.read()
+            with open(liar, "wb") as f:
+                f.write(data[:len(data) - LIE_TRIM])
+            print("  wrote ZZ_LIAR.BMP first (%d -> %d bytes, header still claims %d)"
+                  % (len(data), len(data) - LIE_TRIM, len(data)))
         for name in sources:
             dst = os.path.join(drive, name)
             if not os.path.exists(dst) or md5(dst) != md5(os.path.join(SRC_DIR, name)):
@@ -72,14 +84,6 @@ def main():
                 with open(dst, "wb") as b:
                     b.write(data)
                 print("  wrote %s" % name)
-        liar = os.path.join(drive, "ZZ_LIAR.BMP")
-        if not os.path.exists(liar):
-            with open(os.path.join(SRC_DIR, LIE_SRC), "rb") as f:
-                data = f.read()
-            with open(liar, "wb") as f:
-                f.write(data[:len(data) - LIE_TRIM])
-            print("  wrote ZZ_LIAR.BMP (%d -> %d bytes, header still claims %d)"
-                  % (len(data), len(data) - LIE_TRIM, len(data)))
 
     bad = 0
     print("verify %s" % drive)

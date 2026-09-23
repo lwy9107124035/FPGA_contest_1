@@ -127,15 +127,29 @@ Reading `04` and calling it a failure is the trap this line used to set. If the 
 as a control - if the official images play and ours do not, the defect is in our card
 content, not in the RTL.
 
-The card also carries `ZZ_LIAR.BMP`: a 320x240 whose header claims the full 230454 bytes
-but whose last 3072 were removed. It is the differential test, and it is the only thing on
-this page that works with no serial cable at all:
+The card also carries `ZZ_LIAR.BMP`, written **first** so it is the very first header the
+boot scan meets: a 320x240 whose header claims the full 230454 bytes but whose last 3072
+were removed. It is the differential test, and it needs no serial cable, no scope and no
+second board. Measured layout on the card (`tools/console/_scan_dcard.py`): the liar's
+header is at sector 680, then BMP0000..BMP0007 follow, largest inter-file gap 5408 sectors
+which is under the 8191 stop-loss, everything inside the first 64 MiB.
 
-| count | screen | verdict |
+What the two firmwares do with it, from a cold boot with the default `SCAN_TARGET_COUNT=4`:
+
+| screen | 7-seg | verdict |
 |---|---|---|
-| `08` | images play | v13.0 works: the liar was refused and the eight good files survived it |
-| `09` | black, banner only, `0x18` | the liar was registered and parked the scaler - this is pre-v13.0 behaviour |
-| `08` | black, banner only | the liar is not the cause; go to the delivered-word telemetry next |
+| a picture appears | `04` | v13.0: the liar was refused, four good files registered and loaded |
+| black, banner only, repeating `0x18` | `04` | pre-v13.0: the liar was registered first, parked the scaler, and everything after it is irrelevant |
+| black, banner only | `00` | neither: nothing registered at all, go to Step 0 and re-check the card |
+
+Note the count is `04` in both of the first two rows - the discriminator is **whether a
+picture appears**, not the number. The count only separates them after `SCAN32`, where
+v13.0 reports `08` and the old build reports `09` while never displaying anything.
+
+There is a second, quieter consequence visible in the scan: the old build also skips over
+BMP0000 entirely, because it trusts the liar's inflated `bfSize` and jumps 451 sectors past
+it. `_scan_dcard.py` reproduces exactly that - it finds 8 headers, not 9, and the missing
+one is BMP0000. That is the bug, demonstrated on a real card without the board.
 
 Rebuild or re-check a card with `tools/sd_prep/make_test_card.py D: --verify`, which also
 re-derives the lie from the header instead of trusting the file to still be there.
